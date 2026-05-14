@@ -6,6 +6,23 @@ When a tuning pass spans multiple turns (e.g. "PLAYER_SPEED 12 → 9 → 6"), re
 
 ---
 
+## 2026-05-14 — Aim-line camera-lerp lag fix
+**Built:** Moved `aimLine` drawing out of `update()` into a `Phaser.Scenes.Events.PRE_RENDER` handler (`drawAimLine`). Uses `cam.getWorldPoint(pointer.x, pointer.y)` for the cursor end so the camera's freshly-lerped `scrollX/Y` is reflected. Previous version used `pointer.worldX/Y`, which is set during input update at frame start — Phaser's camera follow-lerp runs *after* `scene.update()`, so the cursor world point was always one frame behind the player's world position when the player moved fast.
+**Tested:** "It looks great."
+**Decisions:** Barrel rotation still computed in `update()` from stale `pointer.worldY/X` — the angle lag is imperceptible on a 14px barrel, and the user explicitly said the barrel was fine. Don't fix what isn't broken.
+
+---
+
+## 2026-05-14 — Step 20: Realism combat polish (spread + fire-slow + knockback)
+**Built:** Three behavioral additions in `js/GameScene.js`, no new visuals/audio:
+- **Bullet spread** — half-cone in degrees, sums state contributions: idle 0° / walking 3° / sprinting 8° / mid-jump 6° / mid-dash 4° / per-shot recoil +5° decaying linearly over 0.3s. Hard cap 15°. Perturbation applied via `Math.atan2`/`cos`/`sin` on the base aim angle inside the existing pointerdown handler.
+- **Fire-slow** — each shot sets `firePenaltyTimer = 0.2s`. While >0, `moveSpeed *= 0.7` (stacks under sprint).
+- **Knockback** — bullet hit sets `kbVX/kbVY = b.vx * 1.5 * kbResistance` and `kbTime = 0.15s` on the exo struct. While `kbTime > 0`, knockback velocity fully replaces chase (clamped to diamond bounds). Touch damage still applies. `kbResistance` per type: basic 1.0 / runner 1.2 / mutant 0.5 / boss 0.0 (immune, can't be shoved out of slime-spit range).
+**Tested:** "It looks great." (after the aim-line fix above)
+**Decisions:** Reused the existing exo struct + per-frame timer-tick pattern. Pointerdown handler re-reads WASD/SHIFT state at fire time rather than caching on `this`. Boss is immune by setting resistance to 0 — the `e.kbResistance > 0` guard in the bullet hit block keeps boss kb fields at 0 so the chase branch always runs.
+
+---
+
 ## 2026-05-14 — Step 19 confirmed passing playtest
 **Tested:** User confirmed "looks good" after playtest on Round 5 boss. `START_ROUND` reverted to 1.
 **Result:** Passed at defaults — no tuning requested.

@@ -18,8 +18,8 @@ Isometric wave-survival shooter in Phaser 3. Jimmy survives 25 rounds of Exo zom
 
 ## Current step tracker
 
-- **Last completed:** Step 19 — Wart Mutant boss attack: telegraphed slime-spit projectile (0.6s wind-up tint+scale, 3s cooldown, 6-tile range, 2 dmg, dodgeable with movement/dash/jump-iframes).
-- **Recent polish (not numbered):** sprint on Left Shift; camera zoom 0.75 + follow.
+- **Last completed:** Step 20 — Realism combat polish: state-dependent bullet spread (idle 0° / walk 3° / sprint 8° / jump 6° / dash 4° + recoil 5° over 0.3s, cap 15°), fire-slow (70% × 0.2s per shot), bullet knockback (1.5 u/s × resistance × 0.15s; basic 1.0× / runner 1.2× / mutant 0.5× / boss 0.0× immune).
+- **Recent polish (not numbered):** sprint on Left Shift; camera zoom 0.75 + follow; aim line moved to `PRE_RENDER` + `cam.getWorldPoint` to remove camera-lerp lag.
 - **Next planned:** TBD — user is sourcing free asset packs; do NOT auto-propose new placeholder polish. Ask before any visual/audio addition.
 
 (Update this section after each step.)

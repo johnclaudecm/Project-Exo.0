@@ -69,11 +69,23 @@ const EXO_SPAWN_INTERVAL_FLOOR = 0.6;
 const EXO_MAX_ALIVE = 30;
 
 const ENEMY_TYPES = {
-  basic:  { w: 22, h: 11, color: 0xc23838, hp: 1, speedMult: 1.0, damage: 1, hitRadius: 0.6, touchRadius: 0.6 },
-  runner: { w: 16, h: 8,  color: 0x30dfff, hp: 1, speedMult: 1.6, damage: 1, hitRadius: 0.5, touchRadius: 0.5 },
-  mutant: { w: 34, h: 17, color: 0xb040ff, hp: 3, speedMult: 0.6, damage: 2, hitRadius: 0.9, touchRadius: 0.9 },
-  boss:   { w: 80, h: 40, color: 0x80c040, hp: 0, speedMult: 0.3, damage: 3, hitRadius: 1.6, touchRadius: 1.4 },
+  basic:  { w: 22, h: 11, color: 0xc23838, hp: 1, speedMult: 1.0, damage: 1, hitRadius: 0.6, touchRadius: 0.6, kbResistance: 1.0 },
+  runner: { w: 16, h: 8,  color: 0x30dfff, hp: 1, speedMult: 1.6, damage: 1, hitRadius: 0.5, touchRadius: 0.5, kbResistance: 1.2 },
+  mutant: { w: 34, h: 17, color: 0xb040ff, hp: 3, speedMult: 0.6, damage: 2, hitRadius: 0.9, touchRadius: 0.9, kbResistance: 0.5 },
+  boss:   { w: 80, h: 40, color: 0x80c040, hp: 0, speedMult: 0.3, damage: 3, hitRadius: 1.6, touchRadius: 1.4, kbResistance: 0.0 },
 };
+
+const SPREAD_WALK = 3;
+const SPREAD_SPRINT = 8;
+const SPREAD_JUMP = 6;
+const SPREAD_DASH = 4;
+const RECOIL_ADD = 5;
+const RECOIL_DECAY = 0.3;
+const SPREAD_CAP = 15;
+const FIRE_MOVE_PENALTY = 0.7;
+const FIRE_PENALTY_DURATION = 0.2;
+const KNOCKBACK_BASE_SPEED = 1.5;
+const KNOCKBACK_DURATION = 0.15;
 
 const BOSS_ROUNDS = [5, 10, 15, 20, 25];
 function isBossRound(n) { return BOSS_ROUNDS.indexOf(n) !== -1; }
@@ -296,6 +308,7 @@ class GameScene extends Phaser.Scene {
 
     this.aimLine = this.add.graphics();
     this.aimLine.setDepth(-500);
+    this.events.on(Phaser.Scenes.Events.PRE_RENDER, this.drawAimLine, this);
 
     this.bullets = [];
 
@@ -334,6 +347,8 @@ class GameScene extends Phaser.Scene {
     this.stamina = STAMINA_MAX;
 
     this.hitFlashTimer = 0;
+    this.recoilTime = 0;
+    this.firePenaltyTimer = 0;
 
     const uiCam = this.cameras.add(0, 0, this.scale.width, this.scale.height);
     uiCam.setName('ui');
@@ -552,6 +567,31 @@ class GameScene extends Phaser.Scene {
       if (len === 0) return;
       dx /= len;
       dy /= len;
+
+      const kk = this.keys;
+      let wvx = 0, wvy = 0;
+      if (kk.W.isDown) { wvx -= 1; wvy -= 1; }
+      if (kk.S.isDown) { wvx += 1; wvy += 1; }
+      if (kk.A.isDown) { wvx -= 1; wvy += 1; }
+      if (kk.D.isDown) { wvx += 1; wvy -= 1; }
+      const fireWasdLen = Math.hypot(wvx, wvy);
+      const fireSprinting = kk.SHIFT.isDown && fireWasdLen > 0 && this.stamina > 0 && this.dashTime <= 0;
+      let spreadDeg = 0;
+      if (fireWasdLen > 0) spreadDeg += fireSprinting ? SPREAD_SPRINT : SPREAD_WALK;
+      if (this.jumpTime > 0) spreadDeg += SPREAD_JUMP;
+      if (this.dashTime > 0) spreadDeg += SPREAD_DASH;
+      spreadDeg += RECOIL_ADD * (this.recoilTime / RECOIL_DECAY);
+      if (spreadDeg > SPREAD_CAP) spreadDeg = SPREAD_CAP;
+      if (spreadDeg > 0) {
+        const baseAngle = Math.atan2(dy, dx);
+        const jitter = (Math.random() * 2 - 1) * spreadDeg * Math.PI / 180;
+        const a = baseAngle + jitter;
+        dx = Math.cos(a);
+        dy = Math.sin(a);
+      }
+      this.recoilTime = RECOIL_DECAY;
+      this.firePenaltyTimer = FIRE_PENALTY_DURATION;
+
       const gfx = this.add.circle(0, 0, BULLET_RADIUS, BULLET_COLOR);
       this.uiCam.ignore(gfx);
       this.bullets.push({
@@ -743,6 +783,10 @@ class GameScene extends Phaser.Scene {
       windupTotal: 0,
       windupTarget: null,
       baseColor: cfg.color,
+      kbVX: 0,
+      kbVY: 0,
+      kbTime: 0,
+      kbResistance: cfg.kbResistance,
     };
     this.exos.push(boss);
     this.boss = boss;
@@ -797,6 +841,10 @@ class GameScene extends Phaser.Scene {
       hitRadius: cfg.hitRadius,
       touchRadius: cfg.touchRadius,
       type,
+      kbVX: 0,
+      kbVY: 0,
+      kbTime: 0,
+      kbResistance: cfg.kbResistance,
     });
   }
 
@@ -928,7 +976,8 @@ class GameScene extends Phaser.Scene {
     } else if (wasdLen > 0) {
       vx /= wasdLen;
       vy /= wasdLen;
-      const moveSpeed = sprinting ? PLAYER_SPEED * SPRINT_MULT : PLAYER_SPEED;
+      let moveSpeed = sprinting ? PLAYER_SPEED * SPRINT_MULT : PLAYER_SPEED;
+      if (this.firePenaltyTimer > 0) moveSpeed *= FIRE_MOVE_PENALTY;
       const step = moveSpeed * dt;
       this.player.worldX += vx * step;
       this.player.worldY += vy * step;
@@ -954,6 +1003,14 @@ class GameScene extends Phaser.Scene {
         this.hitFlashTimer = 0;
         this.player.setFillStyle(PLAYER_COLOR);
       }
+    }
+    if (this.recoilTime > 0) {
+      this.recoilTime -= dt;
+      if (this.recoilTime < 0) this.recoilTime = 0;
+    }
+    if (this.firePenaltyTimer > 0) {
+      this.firePenaltyTimer -= dt;
+      if (this.firePenaltyTimer < 0) this.firePenaltyTimer = 0;
     }
 
     const s = worldToScreen(this.player.worldX, this.player.worldY);
@@ -998,7 +1055,14 @@ class GameScene extends Phaser.Scene {
       let edx = this.player.worldX - e.worldX;
       let edy = this.player.worldY - e.worldY;
       const elen = Math.hypot(edx, edy);
-      if (elen > 0) {
+      if (e.kbTime > 0) {
+        e.worldX += e.kbVX * dt;
+        e.worldY += e.kbVY * dt;
+        e.worldX = Phaser.Math.Clamp(e.worldX, 0, WORLD_TILES);
+        e.worldY = Phaser.Math.Clamp(e.worldY, 0, WORLD_TILES);
+        e.kbTime -= dt;
+        if (e.kbTime < 0) e.kbTime = 0;
+      } else if (elen > 0) {
         edx /= elen;
         edy /= elen;
         e.worldX += edx * e.speed * dt;
@@ -1105,6 +1169,11 @@ class GameScene extends Phaser.Scene {
         const ddy = b.worldY - e.worldY;
         if (ddx * ddx + ddy * ddy <= e.hitRadius * e.hitRadius) {
           e.hp -= 1;
+          if (e.kbResistance > 0) {
+            e.kbVX = b.vx * KNOCKBACK_BASE_SPEED * e.kbResistance;
+            e.kbVY = b.vy * KNOCKBACK_BASE_SPEED * e.kbResistance;
+            e.kbTime = KNOCKBACK_DURATION;
+          }
           this.spawnHitBurst(e.worldX, e.worldY);
           if (e === this.boss) this.updateBossBar();
           if (e.hp <= 0) {
@@ -1187,11 +1256,19 @@ class GameScene extends Phaser.Scene {
       f.gfx.setAlpha(f.life / f.total);
     }
 
+  }
+
+  drawAimLine() {
+    if (!this.aimLine || !this.player) return;
     this.aimLine.clear();
+    if (this.phase !== 'PLAYING' || this.gameOver || this.paused) return;
+    const cam = this.cameras.main;
+    const pointer = this.input.activePointer;
+    const cursor = cam.getWorldPoint(pointer.x, pointer.y);
     this.aimLine.lineStyle(AIM_LINE_WIDTH, AIM_LINE_COLOR, AIM_LINE_ALPHA);
     this.aimLine.beginPath();
     this.aimLine.moveTo(this.player.x, this.player.y);
-    this.aimLine.lineTo(pointer.worldX, pointer.worldY);
+    this.aimLine.lineTo(cursor.x, cursor.y);
     this.aimLine.strokePath();
   }
 }
