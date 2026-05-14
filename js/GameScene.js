@@ -210,7 +210,7 @@ const MUZZLE_FLASH_COLOR = 0xfff0a0;
 
 const ROUND_INTERMISSION = 3.0;
 const ROUND_TOTAL = 25;
-const START_ROUND = 1;
+const START_ROUND = 5;
 function exosForRound(n) { return 5 + (n - 1) * 3; }
 
 const HIT_BURST_LIFE = 0.25;
