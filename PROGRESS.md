@@ -6,9 +6,15 @@ When a tuning pass spans multiple turns (e.g. "PLAYER_SPEED 12 → 9 → 6"), re
 
 ---
 
+## 2026-05-14 — Step 19 confirmed passing playtest
+**Tested:** User confirmed "looks good" after playtest on Round 5 boss. `START_ROUND` reverted to 1.
+**Result:** Passed at defaults — no tuning requested.
+
+---
+
 ## 2026-05-14 — Step 19: Wart Mutant boss attack (telegraphed slime spit)
 **Built:** Boss now winds up for 0.6s when player is within 6 world tiles (color shifts to `0xc0ff60`, scale 1.08), then fires a green slime circle (`0xa8e040`, radius 8) toward the player's position at wind-up start. Slime travels 8 world units/sec, deals 2 dmg on direct hit, despawns on hit / leaving diamond / 2.5s life. 3.0s cooldown from wind-up start. Jump i-frames cover the slime per existing `this.jumpTime <= 0` gate.
-**Tested:** User initiated push at session close — implementation landed but not yet confirmed by playtest.
+**Tested:** Implementation pushed at end of session; playtest confirmation came next session (see entry above).
 **Decisions:** Telegraphed (not instant) per realism + skill-design ask. Direct-hit-only (no AoE puddle) — keeps boss readable; AoE option deferred. Boss keeps walking during wind-up, doesn't freeze.
 
 ---
