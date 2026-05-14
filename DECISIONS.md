@@ -9,7 +9,8 @@ Choices that have been made and are **NOT** to be revisited. One line each, date
 - 2026-05-14 — Vanilla JS + Arcade Physics. Single-bundle static delivery (no build step).
 - 2026-05-14 — Screen-aligned WASD: W=up, S=down, A=left, D=right. Velocities derived from the iso transform, NOT from any spec table that contradicts.
 - 2026-05-14 — Target platform: free HTML5 game portals (itch.io, Newgrounds). Static bundle, no plugins, no server, no backend.
-- 2026-05-14 — Game structure: 25 rounds total; bosses on rounds 5/10/15/20/25.
+- 2026-05-14 — Game structure: 25 rounds total; bosses on rounds 5/10/15/20/25. **Superseded 2026-05-14 by 10-round restructure (see entry below).**
+- 2026-05-14 — Game structure (current): 10 rounds total; bosses on rounds 3/6/9/10. Boss size scales per tier (1.0×/1.4×/1.8×/2.2×) and size dictates danger (bigger hitbox + faster attack cooldown). Round 10 is the mega-boss finale.
 - 2026-05-14 — Boss type: Wart Mutant only (no other bosses planned).
 - 2026-05-14 — Enemy roster: Basic Exo, Exo Runner, Exo Mutant, Wart Mutant boss. No other enemy types in scope.
 - 2026-05-14 — Realism > arcade for all pacing (walk, shamble, reload, spawn cadence).

@@ -6,6 +6,59 @@ When a tuning pass spans multiple turns (e.g. "PLAYER_SPEED 12 → 9 → 6"), re
 
 ---
 
+## 2026-05-14 — Step 23: Headshot weak-point + barrel/aim-line desync fix
+**Built:** Two pieces of playtest feedback in one pass.
+
+*Weak-point mechanic (zombies too weak as 1-shots):*
+- `ENEMY_TYPES` gains `headColor` per type (lighter shade of body): basic 0xff8080, runner 0x80f0ff, mutant 0xd080ff. Boss `headColor: null` (no weak point — slime blob).
+- New constants: `HEAD_WORLD_OFFSET_X = -0.3`, `HEAD_WORLD_OFFSET_Y = -0.3` (projects to ~10px straight up on screen via iso transform: dscreen = (-0.6 * 16) = -9.6px Y), `HEAD_HIT_RADIUS = 0.3` world units, `HEAD_VISUAL_RADIUS = 3` px.
+- `spawnExo` now creates a small head circle when `cfg.headColor` is set, stored as `e.headGfx`.
+- Per-frame enemy render loop also positions `e.headGfx` at the offset world point and gives it depth `+0.05` so it draws on top of the body.
+- Bullet hit loop checks head first: if bullet within `HEAD_HIT_RADIUS` of head world point, set `e.hp = 0` (instant kill). Else fall back to body radius check, 1 damage as before. Body-kill and head-kill both go through the existing death path (ammo drop, kb, kill count, sfx).
+- Death cleanup also destroys `e.headGfx` alongside `e.gfx`.
+- `hpForRound` table bumped by 1 for basic + runner so body-only kill always needs ≥2 shots: basic 2/3/4 (was 1/2/3), runner 2/3/4 (was 1/2/3). Mutant 3/4/5 unchanged (already passed).
+
+*Barrel/aim-line desync (gun rotates off the aim line during movement, intermittent):*
+- Root cause: `barrel.rotation` was computed in `update()` from `pointer.worldX/Y`, which is updated at input poll (frame start). The aim line was already on `PRE_RENDER` using `cam.getWorldPoint(pointer.x, pointer.y)` from Step 20. The camera follow-lerp runs *between* `update()` and `PRE_RENDER`, so the barrel was angling toward a one-step-stale cursor while the aim line angled toward the fresh one. Visible as the gun pointing off the line during camera movement.
+- Fix: barrel `x/y/depth` still set in `update()` (those track the player, no lerp involved), but `barrel.rotation` moved into `drawAimLine` and computed from the same `cam.getWorldPoint` cursor that draws the line. Barrel + aim line now share one cursor source per render frame; they cannot diverge.
+- Same fix applied to the pointerdown handler: bullet direction (`screenToWorld(pointer.worldX, pointer.worldY)`) and muzzle-flash angle (`pointer.worldY/X`) both replaced with `cam.getWorldPoint(pointer.x, pointer.y)`. Shots now leave the barrel along the visible aim line even mid-camera-lerp.
+
+**Tested:** Awaiting next playtest.
+**Decisions:** Headshot = instant kill (not bonus damage) — simplest realism beat, makes the weak point actually mean something at every round. Head dot is a placeholder (3px lighter-shade circle) — when the enemy sprite pack lands, replace it with the actual sprite head region; the offset constants and hit-radius are easy to retune to match a real sprite. Boss intentionally skipped: a slime blob has no obvious head, and giving it a 1-shot crit would trivialize the finale.
+
+---
+
+## 2026-05-14 — Step 22 tuning pass: boss HP halved + hitbox tightened
+**Built:** Two targeted fixes after R3 playtest ("hitbox bigger than visual, didn't have enough ammo, felt super strong"):
+- **Boss hitbox shrunk to live inside the visual:** `ENEMY_TYPES.boss.hitRadius` 1.6 → 1.1; `touchRadius` 1.4 → 0.95. Math: visual ellipse is 80×40 px → half-width = 40px = 1.25 world units along screen-X (TILE_W/2 = 32). Old 1.6 hitbox extended ~28% past the visual edge. New 1.1 sits just inside the sprite; new 0.95 touch lives well inside it so contact damage matches what the player sees. Both still scale with `sizeMult` per Step 22.
+- **Boss HP table halved across all tiers:** `BOSS_HP_TABLE` [50,120,220,400] → [25,60,110,200]. R3 at 50 HP = 5 full mags, which is more than the ammo budget through R1-3 supports (start 40 ammo + ~10 from drops vs. needing ~50 for the boss alone plus regular kills). Halving puts R3 at 2.5 mags — reachable from carryover. R10 mega-boss still 200 HP = 20 mags worth, a real fight but not impossible.
+**Tested:** Awaiting next playtest.
+**Decisions:** Did not bump `AMMO_DROP_CHANCE` (still 0.25) or add boss-death ammo drops yet — boss HP halving alone should fix the economy. If R6/R9/R10 still feel ammo-starved, next lever is drop rate or boss-death drop, not another HP cut.
+
+---
+
+## 2026-05-14 — Step 22: Game restructured 25 → 10 rounds (built, awaiting playtest)
+**Built:** Major rebalance of round structure in `js/GameScene.js`:
+- `ROUND_TOTAL`: 25 → 10. `BOSS_ROUNDS`: [5,10,15,20,25] → [3,6,9,10].
+- New per-tier boss tables driven by `BOSS_ROUNDS` index: `BOSS_HP_TABLE = [50,120,220,400]`, `BOSS_SIZE_TABLE = [1.0,1.4,1.8,2.2]`, `BOSS_ATTACK_COOLDOWN_TABLE = [3.0,2.6,2.2,1.8]` (R10 mega = biggest + most HP + fastest attack — "interesting" lever instead of a new mechanic).
+- Three helpers in the existing one-line `bossHpForRound` style: `bossHpForRound`, `bossSizeMultForRound`, `bossAttackCooldownForRound`. All fall back to safe defaults when called outside boss rounds.
+- `spawnBoss` applies `sizeMult` to `gfx.setScale` + scales `hitRadius` and `touchRadius` proportionally (bigger boss = bigger hitbox = harder to dodge melee). `sizeMult` stored on the boss struct so the windup `setScale` math (was hard-coded `1` / `1.08`) now reads `e.sizeMult` / `e.sizeMult * 1.08`. Attack cooldown read per-round from `bossAttackCooldownForRound(this.roundNumber)` instead of the fixed `BOSS_ATTACK_COOLDOWN` constant.
+- `hpForRound` (Step 21 helper) re-derived for 10 rounds: Basic 1/2/3 @ R1-3/R4-7/R8-10; Runner 1/2/3 @ R3-5/R6-9/R10; Mutant 3/4/5 @ R6-7/R8-9/R10.
+- `enemyMixForRound` re-tiered for 10 rounds: R1-2 basic-only, R3-5 70/30 basic/runner (runner debuts at R3 alongside first boss), R6-8 50/30/20 (mutant debuts at R6 alongside second boss), R9-10 35/35/30.
+- `EXO_SPEED_PER_ROUND` 0.10 → 0.22 (R10 end-speed ≈ 4.7 u/s, matches former R23 feel). `EXO_SPAWN_INTERVAL_PER_ROUND` 0.02 → 0.07 (R10 interval ≈ 0.87s, tighter late-game pressure).
+- `CLAUDE.md` tracker + opening blurb updated. `DECISIONS.md` adds new "10 rounds, bosses on 3/6/9/10" entry and supersedes the old 25-round line in place (kept for history).
+**Tested:** Not yet — awaiting user playtest. Verification path: spot-check each boss tier (`START_ROUND` to 3 / 6 / 9 / 10), confirm victory still triggers at R10, confirm boss sizes scale visibly.
+**Decisions:** Dropped the COD/PZ hybrid feature menu (currency, perks, bleeding, extraction). User pivoted: "the cod thing was a bad idea, forget that, just keep going with development as it was going before." Slime damage + radius left fixed across all bosses — "size dictates danger" is delivered via boss hitbox + cooldown + HP, not slime stats. No new mechanics this step.
+
+---
+
+## 2026-05-14 — Step 21: Per-round HP scaling for non-boss enemies
+**Built:** New `hpForRound(type, n)` helper next to `bossHpForRound`. `spawnExo` now reads `hp` + `maxHp` from the helper instead of `cfg.hp`. (For 25-round schedule — superseded by Step 22's 10-round re-tiering.)
+**Tested:** "feels good" — user confirmed in next message that the difficulty curve felt right.
+**Decisions:** Skipped HP bars (placeholder polish). Kept mag size + reload flat per realism lane. Boss HP untouched — `bossHpForRound` already handled it.
+
+---
+
 ## 2026-05-14 — Aim-line camera-lerp lag fix
 **Built:** Moved `aimLine` drawing out of `update()` into a `Phaser.Scenes.Events.PRE_RENDER` handler (`drawAimLine`). Uses `cam.getWorldPoint(pointer.x, pointer.y)` for the cursor end so the camera's freshly-lerped `scrollX/Y` is reflected. Previous version used `pointer.worldX/Y`, which is set during input update at frame start — Phaser's camera follow-lerp runs *after* `scene.update()`, so the cursor world point was always one frame behind the player's world position when the player moved fast.
 **Tested:** "It looks great."

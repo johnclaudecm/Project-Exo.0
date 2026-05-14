@@ -62,18 +62,23 @@ const AIM_LINE_ALPHA = 0.35;
 const AIM_LINE_WIDTH = 1;
 
 const EXO_SPEED_BASE = 2.5;
-const EXO_SPEED_PER_ROUND = 0.10;
+const EXO_SPEED_PER_ROUND = 0.22;
 const EXO_SPAWN_INTERVAL_BASE = 1.5;
-const EXO_SPAWN_INTERVAL_PER_ROUND = 0.02;
+const EXO_SPAWN_INTERVAL_PER_ROUND = 0.07;
 const EXO_SPAWN_INTERVAL_FLOOR = 0.6;
 const EXO_MAX_ALIVE = 30;
 
 const ENEMY_TYPES = {
-  basic:  { w: 22, h: 11, color: 0xc23838, hp: 1, speedMult: 1.0, damage: 1, hitRadius: 0.6, touchRadius: 0.6, kbResistance: 1.0 },
-  runner: { w: 16, h: 8,  color: 0x30dfff, hp: 1, speedMult: 1.6, damage: 1, hitRadius: 0.5, touchRadius: 0.5, kbResistance: 1.2 },
-  mutant: { w: 34, h: 17, color: 0xb040ff, hp: 3, speedMult: 0.6, damage: 2, hitRadius: 0.9, touchRadius: 0.9, kbResistance: 0.5 },
-  boss:   { w: 80, h: 40, color: 0x80c040, hp: 0, speedMult: 0.3, damage: 3, hitRadius: 1.6, touchRadius: 1.4, kbResistance: 0.0 },
+  basic:  { w: 22, h: 11, color: 0xc23838, headColor: 0xff8080, hp: 1, speedMult: 1.0, damage: 1, hitRadius: 0.6, touchRadius: 0.6, kbResistance: 1.0 },
+  runner: { w: 16, h: 8,  color: 0x30dfff, headColor: 0x80f0ff, hp: 1, speedMult: 1.6, damage: 1, hitRadius: 0.5, touchRadius: 0.5, kbResistance: 1.2 },
+  mutant: { w: 34, h: 17, color: 0xb040ff, headColor: 0xd080ff, hp: 3, speedMult: 0.6, damage: 2, hitRadius: 0.9, touchRadius: 0.9, kbResistance: 0.5 },
+  boss:   { w: 80, h: 40, color: 0x80c040, headColor: null,     hp: 0, speedMult: 0.3, damage: 3, hitRadius: 1.1, touchRadius: 0.95, kbResistance: 0.0 },
 };
+
+const HEAD_WORLD_OFFSET_X = -0.3;
+const HEAD_WORLD_OFFSET_Y = -0.3;
+const HEAD_HIT_RADIUS = 0.3;
+const HEAD_VISUAL_RADIUS = 3;
 
 const SPREAD_WALK = 3;
 const SPREAD_SPRINT = 8;
@@ -87,11 +92,41 @@ const FIRE_PENALTY_DURATION = 0.2;
 const KNOCKBACK_BASE_SPEED = 1.5;
 const KNOCKBACK_DURATION = 0.15;
 
-const BOSS_ROUNDS = [5, 10, 15, 20, 25];
+const BOSS_ROUNDS = [3, 6, 9, 10];
+const BOSS_HP_TABLE = [25, 60, 110, 200];
+const BOSS_SIZE_TABLE = [1.0, 1.4, 1.8, 2.2];
+const BOSS_ATTACK_COOLDOWN_TABLE = [3.0, 2.6, 2.2, 1.8];
 function isBossRound(n) { return BOSS_ROUNDS.indexOf(n) !== -1; }
 function bossHpForRound(n) {
   const idx = BOSS_ROUNDS.indexOf(n);
-  return 30 + idx * 30;
+  return idx === -1 ? 50 : BOSS_HP_TABLE[idx];
+}
+function bossSizeMultForRound(n) {
+  const idx = BOSS_ROUNDS.indexOf(n);
+  return idx === -1 ? 1.0 : BOSS_SIZE_TABLE[idx];
+}
+function bossAttackCooldownForRound(n) {
+  const idx = BOSS_ROUNDS.indexOf(n);
+  return idx === -1 ? 3.0 : BOSS_ATTACK_COOLDOWN_TABLE[idx];
+}
+
+function hpForRound(type, n) {
+  if (type === 'basic') {
+    if (n <= 3) return 2;
+    if (n <= 7) return 3;
+    return 4;
+  }
+  if (type === 'runner') {
+    if (n <= 5) return 2;
+    if (n <= 9) return 3;
+    return 4;
+  }
+  if (type === 'mutant') {
+    if (n <= 7) return 3;
+    if (n <= 9) return 4;
+    return 5;
+  }
+  return ENEMY_TYPES[type] ? ENEMY_TYPES[type].hp : 1;
 }
 
 const BOSS_ATTACK_RANGE = 6.0;
@@ -106,9 +141,9 @@ const BOSS_SLIME_MAX_LIFE = 2.5;
 const BOSS_SLIME_COLOR = 0xa8e040;
 
 function enemyMixForRound(n) {
-  if (n <= 4)  return [['basic', 1.0]];
-  if (n <= 9)  return [['basic', 0.70], ['runner', 0.30]];
-  if (n <= 14) return [['basic', 0.50], ['runner', 0.30], ['mutant', 0.20]];
+  if (n <= 2) return [['basic', 1.0]];
+  if (n <= 5) return [['basic', 0.70], ['runner', 0.30]];
+  if (n <= 8) return [['basic', 0.50], ['runner', 0.30], ['mutant', 0.20]];
   return [['basic', 0.35], ['runner', 0.35], ['mutant', 0.30]];
 }
 
@@ -221,7 +256,7 @@ const MUZZLE_FLASH_RADIUS = 11;
 const MUZZLE_FLASH_COLOR = 0xfff0a0;
 
 const ROUND_INTERMISSION = 3.0;
-const ROUND_TOTAL = 25;
+const ROUND_TOTAL = 10;
 const START_ROUND = 1;
 function exosForRound(n) { return 5 + (n - 1) * 3; }
 
@@ -560,7 +595,9 @@ class GameScene extends Phaser.Scene {
       if (this.paused) return;
       if (this.reloadTimer > 0) return;
       if (this.ammo <= 0) return;
-      const cw = screenToWorld(pointer.worldX, pointer.worldY);
+      const cam = this.cameras.main;
+      const cursorWorldPx = cam.getWorldPoint(pointer.x, pointer.y);
+      const cw = screenToWorld(cursorWorldPx.x, cursorWorldPx.y);
       let dx = cw.x - this.player.worldX;
       let dy = cw.y - this.player.worldY;
       const len = Math.hypot(dx, dy);
@@ -606,7 +643,7 @@ class GameScene extends Phaser.Scene {
       this.updateAmmoText();
       sfxShoot();
 
-      const angle = Math.atan2(pointer.worldY - this.player.y, pointer.worldX - this.player.x);
+      const angle = Math.atan2(cursorWorldPx.y - this.player.y, cursorWorldPx.x - this.player.x);
       const mx = this.player.x + Math.cos(angle) * BARREL_LENGTH;
       const my = this.player.y + Math.sin(angle) * BARREL_LENGTH;
       const flash = this.add.circle(mx, my, MUZZLE_FLASH_RADIUS, MUZZLE_FLASH_COLOR);
@@ -764,7 +801,9 @@ class GameScene extends Phaser.Scene {
     else { wx = 0; wy = WORLD_TILES / 2; }
     const cfg = ENEMY_TYPES.boss;
     const maxHp = bossHpForRound(this.roundNumber);
+    const sizeMult = bossSizeMultForRound(this.roundNumber);
     const gfx = this.add.ellipse(0, 0, cfg.w, cfg.h, cfg.color);
+    gfx.setScale(sizeMult);
     this.uiCam.ignore(gfx);
     const boss = {
       gfx,
@@ -775,14 +814,15 @@ class GameScene extends Phaser.Scene {
       hp: maxHp,
       maxHp,
       damage: cfg.damage,
-      hitRadius: cfg.hitRadius,
-      touchRadius: cfg.touchRadius,
+      hitRadius: cfg.hitRadius * sizeMult,
+      touchRadius: cfg.touchRadius * sizeMult,
       type: 'boss',
       attackCooldown: 0,
       windupTime: 0,
       windupTotal: 0,
       windupTarget: null,
       baseColor: cfg.color,
+      sizeMult,
       kbVX: 0,
       kbVY: 0,
       kbTime: 0,
@@ -829,14 +869,20 @@ class GameScene extends Phaser.Scene {
     const cfg = ENEMY_TYPES[type];
     const gfx = this.add.ellipse(0, 0, cfg.w, cfg.h, cfg.color);
     this.uiCam.ignore(gfx);
+    let headGfx = null;
+    if (cfg.headColor !== null && cfg.headColor !== undefined) {
+      headGfx = this.add.circle(0, 0, HEAD_VISUAL_RADIUS, cfg.headColor);
+      this.uiCam.ignore(headGfx);
+    }
     this.exos.push({
       gfx,
+      headGfx,
       worldX: wx,
       worldY: wy,
       touchTimer: 0,
       speed: exoSpeedForRound(this.roundNumber) * cfg.speedMult,
-      hp: cfg.hp,
-      maxHp: cfg.hp,
+      hp: hpForRound(type, this.roundNumber),
+      maxHp: hpForRound(type, this.roundNumber),
       damage: cfg.damage,
       hitRadius: cfg.hitRadius,
       touchRadius: cfg.touchRadius,
@@ -1088,7 +1134,7 @@ class GameScene extends Phaser.Scene {
           if (e.windupTime <= 0) {
             e.windupTime = 0;
             e.gfx.fillColor = e.baseColor;
-            e.gfx.setScale(1);
+            e.gfx.setScale(e.sizeMult);
             if (e.windupTarget) {
               this.spawnBossSlime(e.worldX, e.worldY, e.windupTarget.x, e.windupTarget.y);
               e.windupTarget = null;
@@ -1101,14 +1147,20 @@ class GameScene extends Phaser.Scene {
           e.windupTotal = BOSS_WINDUP_DURATION;
           e.windupTarget = { x: this.player.worldX, y: this.player.worldY };
           e.gfx.fillColor = BOSS_WINDUP_COLOR;
-          e.gfx.setScale(1.08);
-          e.attackCooldown = BOSS_ATTACK_COOLDOWN;
+          e.gfx.setScale(e.sizeMult * 1.08);
+          e.attackCooldown = bossAttackCooldownForRound(this.roundNumber);
         }
       }
       const es = worldToScreen(e.worldX, e.worldY);
       e.gfx.x = es.x;
       e.gfx.y = es.y;
       e.gfx.depth = e.worldX + e.worldY;
+      if (e.headGfx) {
+        const hs = worldToScreen(e.worldX + HEAD_WORLD_OFFSET_X, e.worldY + HEAD_WORLD_OFFSET_Y);
+        e.headGfx.x = hs.x;
+        e.headGfx.y = hs.y;
+        e.headGfx.depth = e.worldX + e.worldY + 0.05;
+      }
     }
 
     for (let i = this.slimes.length - 1; i >= 0; i--) {
@@ -1165,10 +1217,23 @@ class GameScene extends Phaser.Scene {
       let hit = false;
       for (let j = this.exos.length - 1; j >= 0; j--) {
         const e = this.exos[j];
+        let headHit = false;
+        if (e.headGfx) {
+          const hdx = b.worldX - (e.worldX + HEAD_WORLD_OFFSET_X);
+          const hdy = b.worldY - (e.worldY + HEAD_WORLD_OFFSET_Y);
+          if (hdx * hdx + hdy * hdy <= HEAD_HIT_RADIUS * HEAD_HIT_RADIUS) {
+            headHit = true;
+          }
+        }
         const ddx = b.worldX - e.worldX;
         const ddy = b.worldY - e.worldY;
-        if (ddx * ddx + ddy * ddy <= e.hitRadius * e.hitRadius) {
-          e.hp -= 1;
+        const bodyHit = (ddx * ddx + ddy * ddy <= e.hitRadius * e.hitRadius);
+        if (headHit || bodyHit) {
+          if (headHit) {
+            e.hp = 0;
+          } else {
+            e.hp -= 1;
+          }
           if (e.kbResistance > 0) {
             e.kbVX = b.vx * KNOCKBACK_BASE_SPEED * e.kbResistance;
             e.kbVY = b.vy * KNOCKBACK_BASE_SPEED * e.kbResistance;
@@ -1186,6 +1251,7 @@ class GameScene extends Phaser.Scene {
               this.hideBossBar();
             }
             e.gfx.destroy();
+            if (e.headGfx) e.headGfx.destroy();
             this.exos.splice(j, 1);
             this.kills += 1;
             this.updateKillsText();
@@ -1238,11 +1304,8 @@ class GameScene extends Phaser.Scene {
       br.gfx.setAlpha(1 - t);
     }
 
-    const pointer = this.input.activePointer;
-    const aimAngle = Math.atan2(pointer.worldY - this.player.y, pointer.worldX - this.player.x);
     this.barrel.x = this.player.x;
     this.barrel.y = this.player.y;
-    this.barrel.rotation = aimAngle;
     this.barrel.depth = this.player.depth + 0.1;
 
     for (let i = this.muzzleFlashes.length - 1; i >= 0; i--) {
@@ -1265,6 +1328,9 @@ class GameScene extends Phaser.Scene {
     const cam = this.cameras.main;
     const pointer = this.input.activePointer;
     const cursor = cam.getWorldPoint(pointer.x, pointer.y);
+    if (this.barrel) {
+      this.barrel.rotation = Math.atan2(cursor.y - this.player.y, cursor.x - this.player.x);
+    }
     this.aimLine.lineStyle(AIM_LINE_WIDTH, AIM_LINE_COLOR, AIM_LINE_ALPHA);
     this.aimLine.beginPath();
     this.aimLine.moveTo(this.player.x, this.player.y);

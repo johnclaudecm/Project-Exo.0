@@ -1,6 +1,6 @@
 # Project Exo
 
-Isometric wave-survival shooter in Phaser 3. Jimmy survives 25 rounds of Exo zombies with Wart Mutant bosses on rounds 5/10/15/20/25. Target: free HTML5 game portals.
+Isometric wave-survival shooter in Phaser 3. Jimmy survives 10 rounds of Exo zombies with Wart Mutant bosses on rounds 3/6/9/10 (size + HP + attack speed scale per tier; round 10 is the mega-boss finale). Target: free HTML5 game portals.
 
 ## Rules that don't get waived
 
@@ -18,9 +18,19 @@ Isometric wave-survival shooter in Phaser 3. Jimmy survives 25 rounds of Exo zom
 
 ## Current step tracker
 
-- **Last completed:** Step 20 — Realism combat polish: state-dependent bullet spread (idle 0° / walk 3° / sprint 8° / jump 6° / dash 4° + recoil 5° over 0.3s, cap 15°), fire-slow (70% × 0.2s per shot), bullet knockback (1.5 u/s × resistance × 0.15s; basic 1.0× / runner 1.2× / mutant 0.5× / boss 0.0× immune).
+- **Last completed:** Step 23 — Headshot weak-point mechanic + Step 22 follow-up tuning. Non-boss enemies (basic/runner/mutant) now spawn with a small `headGfx` dot (lighter shade of body color, 3px radius) drawn ~10px above the body via world offset (-0.3, -0.3). Bullet within `HEAD_HIT_RADIUS = 0.3` of head world point = instant kill regardless of body HP. Body shot still 1 dmg, must drain HP. Boss has `headColor: null` and gets no head (slime blob, no weak point). HP minimums bumped so body-only kill always needs ≥2 shots: Basic 2/3/4, Runner 2/3/4, Mutant 3/4/5 (unchanged). **Barrel/aim-line desync fix:** barrel rotation moved from `update()` to `drawAimLine` (PRE_RENDER) using `cam.getWorldPoint(pointer.x, pointer.y)` — same fresh-cursor source as the aim line, so they can no longer diverge. Click-time bullet direction + muzzle-flash angle also switched to `cam.getWorldPoint` so shots travel down the visible aim line even mid-camera-lerp. *Awaiting playtest confirm.*
+- **Step 22 tuning logged at confirm time:** boss `hitRadius` 1.6→1.1 and `touchRadius` 1.4→0.95; `BOSS_HP_TABLE` halved to [25,60,110,200].
+- **Last passed playtest:** Step 21 — per-round non-boss HP scaling. ("feels good")
 - **Recent polish (not numbered):** sprint on Left Shift; camera zoom 0.75 + follow; aim line moved to `PRE_RENDER` + `cam.getWorldPoint` to remove camera-lerp lag.
-- **Next planned:** TBD — user is sourcing free asset packs; do NOT auto-propose new placeholder polish. Ask before any visual/audio addition.
+- **Session handoff (2026-05-14 EOD):** Step 22 + Step 23 are built and committed but NOT yet playtest-confirmed. Next session: have user playtest first, confirm or tune, THEN propose the next numbered step. Do not start a new feature until the unpaid playtest tab is closed.
+- **What needs testing on next playtest:**
+  1. **Body shots take ≥2 hits.** Basic + Runner are 2 HP on R1-3, 3 HP on R4-7, 4 HP on R8-10. No 1-shot body kills should ever happen.
+  2. **Headshots = instant kill.** Each non-boss zombie has a small light-colored head dot ~10px above the body (basic = light red, runner = light cyan, mutant = light purple). Bullet within ~0.3 world units of the head = instant kill regardless of HP.
+  3. **Gun stays glued to aim line.** Sprint around, swing the mouse fast, watch for the barrel rotating off the white aim line. They share one cursor source per render frame now — if they ever diverge, the fix didn't take.
+  4. **Bullets travel down the aim line.** Fire while the camera is mid-lerp (right after sprinting). Bullet path should match the aim line, not fly off-angle.
+  5. **Boss feel (still unconfirmed from Step 22):** R3 boss at 25 HP (~2.5 mags), R6 at 60, R9 at 110, R10 mega at 200. Hitbox should match the visual silhouette now. Boss has no head — confirm no head dot on it.
+  6. **R10 mega boss is the finale beat.** 2.2× size, 1.8s attack cooldown, 200 HP. Should feel like a wall, not unkillable.
+- **Next planned:** TBD pending playtest. User is sourcing free asset packs; do NOT auto-propose new placeholder polish. Ask before any visual/audio addition.
 
 (Update this section after each step.)
 
