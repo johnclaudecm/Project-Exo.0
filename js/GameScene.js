@@ -82,6 +82,17 @@ function bossHpForRound(n) {
   return 30 + idx * 30;
 }
 
+const BOSS_ATTACK_RANGE = 6.0;
+const BOSS_ATTACK_COOLDOWN = 3.0;
+const BOSS_WINDUP_DURATION = 0.6;
+const BOSS_WINDUP_COLOR = 0xc0ff60;
+const BOSS_SLIME_SPEED = 8.0;
+const BOSS_SLIME_DAMAGE = 2;
+const BOSS_SLIME_RADIUS = 8;
+const BOSS_SLIME_HIT_RADIUS = 0.5;
+const BOSS_SLIME_MAX_LIFE = 2.5;
+const BOSS_SLIME_COLOR = 0xa8e040;
+
 function enemyMixForRound(n) {
   if (n <= 4)  return [['basic', 1.0]];
   if (n <= 9)  return [['basic', 0.70], ['runner', 0.30]];
@@ -290,6 +301,7 @@ class GameScene extends Phaser.Scene {
 
     this.exos = [];
     this.exoSpawnTimer = 0;
+    this.slimes = [];
 
     this.roundNumber = START_ROUND;
     this.roundSpawnsRemaining = exosForRound(this.roundNumber);
@@ -726,6 +738,11 @@ class GameScene extends Phaser.Scene {
       hitRadius: cfg.hitRadius,
       touchRadius: cfg.touchRadius,
       type: 'boss',
+      attackCooldown: 0,
+      windupTime: 0,
+      windupTotal: 0,
+      windupTarget: null,
+      baseColor: cfg.color,
     };
     this.exos.push(boss);
     this.boss = boss;
@@ -733,6 +750,27 @@ class GameScene extends Phaser.Scene {
     this.bossBarFill.setVisible(true);
     this.bossLabel.setVisible(true);
     this.updateBossBar();
+  }
+
+  spawnBossSlime(fromX, fromY, toX, toY) {
+    let dx = toX - fromX;
+    let dy = toY - fromY;
+    const len = Math.hypot(dx, dy);
+    if (len === 0) return;
+    dx /= len;
+    dy /= len;
+    const s = worldToScreen(fromX, fromY);
+    const gfx = this.add.circle(s.x, s.y, BOSS_SLIME_RADIUS, BOSS_SLIME_COLOR);
+    gfx.setDepth(fromX + fromY + 0.05);
+    this.uiCam.ignore(gfx);
+    this.slimes.push({
+      gfx,
+      worldX: fromX,
+      worldY: fromY,
+      vx: dx,
+      vy: dy,
+      life: BOSS_SLIME_MAX_LIFE,
+    });
   }
 
   spawnExo() {
@@ -980,10 +1018,70 @@ class GameScene extends Phaser.Scene {
           this.triggerGameOver();
         }
       }
+      if (e.type === 'boss') {
+        if (e.windupTime > 0) {
+          e.windupTime -= dt;
+          if (e.windupTime <= 0) {
+            e.windupTime = 0;
+            e.gfx.fillColor = e.baseColor;
+            e.gfx.setScale(1);
+            if (e.windupTarget) {
+              this.spawnBossSlime(e.worldX, e.worldY, e.windupTarget.x, e.windupTarget.y);
+              e.windupTarget = null;
+            }
+          }
+        } else if (e.attackCooldown > 0) {
+          e.attackCooldown -= dt;
+        } else if (elen <= BOSS_ATTACK_RANGE) {
+          e.windupTime = BOSS_WINDUP_DURATION;
+          e.windupTotal = BOSS_WINDUP_DURATION;
+          e.windupTarget = { x: this.player.worldX, y: this.player.worldY };
+          e.gfx.fillColor = BOSS_WINDUP_COLOR;
+          e.gfx.setScale(1.08);
+          e.attackCooldown = BOSS_ATTACK_COOLDOWN;
+        }
+      }
       const es = worldToScreen(e.worldX, e.worldY);
       e.gfx.x = es.x;
       e.gfx.y = es.y;
       e.gfx.depth = e.worldX + e.worldY;
+    }
+
+    for (let i = this.slimes.length - 1; i >= 0; i--) {
+      const sl = this.slimes[i];
+      sl.worldX += sl.vx * BOSS_SLIME_SPEED * dt;
+      sl.worldY += sl.vy * BOSS_SLIME_SPEED * dt;
+      sl.life -= dt;
+      if (
+        sl.life <= 0 ||
+        sl.worldX < 0 || sl.worldX > WORLD_TILES ||
+        sl.worldY < 0 || sl.worldY > WORLD_TILES
+      ) {
+        sl.gfx.destroy();
+        this.slimes.splice(i, 1);
+        continue;
+      }
+      const pdx = this.player.worldX - sl.worldX;
+      const pdy = this.player.worldY - sl.worldY;
+      if (pdx * pdx + pdy * pdy <= BOSS_SLIME_HIT_RADIUS * BOSS_SLIME_HIT_RADIUS && this.jumpTime <= 0) {
+        this.playerHP -= BOSS_SLIME_DAMAGE;
+        this.hitFlashTimer = HIT_FLASH_DURATION;
+        this.player.setFillStyle(PLAYER_HIT_COLOR);
+        sfxPlayerHit();
+        this.updateHPText();
+        sl.gfx.destroy();
+        this.slimes.splice(i, 1);
+        if (this.playerHP <= 0) {
+          this.playerHP = 0;
+          this.updateHPText();
+          this.triggerGameOver();
+        }
+        continue;
+      }
+      const sls = worldToScreen(sl.worldX, sl.worldY);
+      sl.gfx.x = sls.x;
+      sl.gfx.y = sls.y;
+      sl.gfx.depth = sl.worldX + sl.worldY;
     }
 
     for (let i = this.bullets.length - 1; i >= 0; i--) {

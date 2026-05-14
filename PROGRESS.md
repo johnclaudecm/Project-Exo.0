@@ -6,6 +6,19 @@ When a tuning pass spans multiple turns (e.g. "PLAYER_SPEED 12 → 9 → 6"), re
 
 ---
 
+## 2026-05-14 — Step 19: Wart Mutant boss attack (telegraphed slime spit)
+**Built:** Boss now winds up for 0.6s when player is within 6 world tiles (color shifts to `0xc0ff60`, scale 1.08), then fires a green slime circle (`0xa8e040`, radius 8) toward the player's position at wind-up start. Slime travels 8 world units/sec, deals 2 dmg on direct hit, despawns on hit / leaving diamond / 2.5s life. 3.0s cooldown from wind-up start. Jump i-frames cover the slime per existing `this.jumpTime <= 0` gate.
+**Tested:** User initiated push at session close — implementation landed but not yet confirmed by playtest.
+**Decisions:** Telegraphed (not instant) per realism + skill-design ask. Direct-hit-only (no AoE puddle) — keeps boss readable; AoE option deferred. Boss keeps walking during wind-up, doesn't freeze.
+
+---
+
+## 2026-05-14 — Pushed to GitHub
+**Built:** `git init -b main`, `.gitignore`, identity set locally for this repo (johnclaudecm / gtaautogroupsales@gmail.com — global git config left untouched), remote `origin` = `https://github.com/johnclaudecm/Project-Exo.0`, first commit pushed as `c2102f8` on `main`. WebFetch cache showed empty for ~15min after push but `git ls-remote` confirmed the commit is live.
+**Decisions:** Identity is **local-to-repo only** (not `--global`) — global git settings on this machine remain untouched. User can override either field at any time.
+
+---
+
 ## 2026-05-14 — Context-persistence files set up
 **Built:** `CLAUDE.md`, `DECISIONS.md`, `PROGRESS.md` at project root. CLAUDE.md is the operating-rules + current-step tracker; DECISIONS.md is the locked-choice list; this file is the append-only log.
 **Tested:** N/A — meta step.

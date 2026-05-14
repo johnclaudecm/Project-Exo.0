@@ -18,7 +18,7 @@ Isometric wave-survival shooter in Phaser 3. Jimmy survives 25 rounds of Exo zom
 
 ## Current step tracker
 
-- **Last completed:** Step 18 — synth SFX (shoot / enemy hit / enemy death / player hit).
+- **Last completed:** Step 19 — Wart Mutant boss attack: telegraphed slime-spit projectile (0.6s wind-up tint+scale, 3s cooldown, 6-tile range, 2 dmg, dodgeable with movement/dash/jump-iframes).
 - **Recent polish (not numbered):** sprint on Left Shift; camera zoom 0.75 + follow.
 - **Next planned:** TBD — user is sourcing free asset packs; do NOT auto-propose new placeholder polish. Ask before any visual/audio addition.
 
