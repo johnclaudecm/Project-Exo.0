@@ -1,3 +1,28 @@
+// ============================================================
+// FILE MAP — js/GameScene.js
+// Read this first; use Read with offset/limit to load only the
+// section you need. If you add/remove code, update this map AND
+// the section headers below so ranges stay accurate.
+// ============================================================
+//  1. AUDIO SYNTH MODULE                  (lines 25-75)
+//  2. COMBAT CONSTANTS                    (lines 76-128)
+//  3. BOSS / ROUND HELPERS                (lines 129-176)
+//  4. ENEMY MIX & SPAWN-RATE HELPERS      (lines 177-205)
+//  5. LEADERBOARD MODULE                  (lines 206-269)
+//  6. MOVEMENT / VISUAL / UI CONSTANTS    (lines 270-314)
+//  7. SCENE: init + create() setup        (lines 315-694)
+//  8. UI/HUD UPDATERS + RELOAD            (lines 695-737)
+//  9. PICKUP & BURST SPAWNERS             (lines 738-752)
+// 10. ROUND FLOW (intermission/next)      (lines 753-773)
+// 11. TITLE & RUN RECORDING               (lines 774-825)
+// 12. BOSS BAR HELPERS                    (lines 826-838)
+// 13. HIT RESOLVER + BODY-PART HELPERS    (lines 839-906)
+// 14. ENEMY / BOSS / SLIME SPAWN          (lines 907-1009)
+// 15. update() main loop                  (lines 1010-1432)
+// 16. drawAimLine() PRE_RENDER            (lines 1433-1450)
+// ============================================================
+
+// ===== 1. AUDIO SYNTH MODULE (lines 25-75) =====
 let audioCtx = null;
 function initAudio() {
   if (audioCtx) return;
@@ -48,6 +73,7 @@ function sfxEnemyHit()    { tone(420, 0.05, 'square', 0.08, 300); }
 function sfxEnemyDeath()  { tone(150, 0.18, 'sawtooth', 0.12, 70); }
 function sfxPlayerHit()   { tone(110, 0.22, 'sawtooth', 0.18, 55); }
 
+// ===== 2. COMBAT CONSTANTS (lines 76-128) =====
 const PLAYER_SPEED = 6;
 const PLAYER_W = 24;
 const PLAYER_H = 12;
@@ -100,6 +126,7 @@ const RECOIL_ADD = 5;
 const RECOIL_DECAY = 0.3;
 const SPREAD_CAP = 15;
 
+// ===== 3. BOSS / ROUND HELPERS (lines 129-176) =====
 const BOSS_ROUNDS = [3, 6, 9, 10];
 const BOSS_HP_TABLE = [25, 60, 110, 200];
 const BOSS_SIZE_TABLE = [1.0, 1.4, 1.8, 2.2];
@@ -147,6 +174,7 @@ const BOSS_SLIME_RADIUS = 8;
 const BOSS_SLIME_MAX_LIFE = 2.5;
 const BOSS_SLIME_COLOR = 0xa8e040;
 
+// ===== 4. ENEMY MIX & SPAWN-RATE HELPERS (lines 177-205) =====
 function enemyMixForRound(n) {
   if (n <= 2) return [['basic', 1.0]];
   if (n <= 5) return [['basic', 0.70], ['runner', 0.30]];
@@ -175,6 +203,7 @@ const EXO_TOUCH_COOLDOWN = 1.0;
 
 const PLAYER_MAX_HP = 5;
 
+// ===== 5. LEADERBOARD MODULE (lines 206-269) =====
 const USERNAME_KEY = 'projectExoUsername';
 const LEADERBOARD_KEY = 'projectExoLeaderboard';
 const LEADERBOARD_MAX = 10;
@@ -238,6 +267,7 @@ function formatLeaderboard(board, highlightEntry) {
   return lines.join('\n');
 }
 
+// ===== 6. MOVEMENT / VISUAL / UI CONSTANTS (lines 270-314) =====
 const DASH_DISTANCE = 2.0;
 const DASH_DURATION = 0.18;
 
@@ -282,6 +312,7 @@ const AMMO_PICKUP_W = 10;
 const AMMO_PICKUP_H = 10;
 const AMMO_PICKUP_COLOR = 0xffe066;
 
+// ===== 7. SCENE: init + create() setup (lines 315-694) =====
 class GameScene extends Phaser.Scene {
   constructor() {
     super({ key: 'GameScene' });
@@ -661,6 +692,7 @@ class GameScene extends Phaser.Scene {
     });
   }
 
+  // ===== 8. UI/HUD UPDATERS + RELOAD (lines 695-737) =====
   updateHPText() {
     this.hpText.setText('HP: ' + this.playerHP + ' / ' + PLAYER_MAX_HP);
   }
@@ -703,6 +735,7 @@ class GameScene extends Phaser.Scene {
     this.updateAmmoText();
   }
 
+  // ===== 9. PICKUP & BURST SPAWNERS (lines 738-752) =====
   spawnAmmoPickup(worldX, worldY) {
     const gfx = this.add.rectangle(0, 0, AMMO_PICKUP_W, AMMO_PICKUP_H, AMMO_PICKUP_COLOR);
     this.uiCam.ignore(gfx);
@@ -717,6 +750,7 @@ class GameScene extends Phaser.Scene {
     this.bursts.push({ gfx, life: HIT_BURST_LIFE, total: HIT_BURST_LIFE });
   }
 
+  // ===== 10. ROUND FLOW (intermission/next) (lines 753-773) =====
   startIntermission() {
     this.betweenRounds = true;
     this.intermissionTimer = ROUND_INTERMISSION;
@@ -737,6 +771,7 @@ class GameScene extends Phaser.Scene {
     this.updateRoundText();
   }
 
+  // ===== 11. TITLE & RUN RECORDING (lines 774-825) =====
   refreshTitleText() {
     const board = loadLeaderboard();
     const lbText = board.length === 0
@@ -788,6 +823,7 @@ class GameScene extends Phaser.Scene {
     this.recordRunAndFormat('GAME OVER', '#ff5555');
   }
 
+  // ===== 12. BOSS BAR HELPERS (lines 826-838) =====
   updateBossBar() {
     if (!this.boss) return;
     const frac = Math.max(0, this.boss.hp / this.boss.maxHp);
@@ -800,6 +836,7 @@ class GameScene extends Phaser.Scene {
     this.bossLabel.setVisible(false);
   }
 
+  // ===== 13. HIT RESOLVER + BODY-PART HELPERS (lines 839-906) =====
   resolveHit(target, hitWX, hitWY, baseDamage, zoneOverride) {
     let zone = zoneOverride || null;
     if (!zone) {
@@ -867,6 +904,7 @@ class GameScene extends Phaser.Scene {
     if (parts.neck) parts.neck.destroy();
   }
 
+  // ===== 14. ENEMY / BOSS / SLIME SPAWN (lines 907-1009) =====
   spawnBoss() {
     const edge = Math.floor(Math.random() * 4);
     let wx, wy;
@@ -969,6 +1007,7 @@ class GameScene extends Phaser.Scene {
     });
   }
 
+  // ===== 15. update() main loop (lines 1010-1432) =====
   update(time, delta) {
     const k = this.keys;
     const dtPre = delta / 1000;
@@ -1391,6 +1430,7 @@ class GameScene extends Phaser.Scene {
 
   }
 
+  // ===== 16. drawAimLine() PRE_RENDER (lines 1433-1450) =====
   drawAimLine() {
     if (!this.aimLine || !this.player) return;
     this.aimLine.clear();

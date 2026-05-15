@@ -36,13 +36,34 @@ Isometric wave-survival shooter in Phaser 3. Jimmy survives 10 rounds of Exo zom
 - `PROGRESS.md` — append-only run log (newest at top).
 - `DECISIONS.md` — locked-in choices, one line each.
 
-## Where things live in GameScene.js
+## GameScene.js structure
 
-- **Top of file:** constants (player, bullets, exos, enemy types, pacing, audio, stamina, leaderboard keys) and the WebAudio SFX module.
-- **`init(data)`:** reads `skipTitle` from scene-restart data.
-- **`create()`:** camera + ground + player + barrel + shadow + all HUD text + bars + title/pause/game-over overlays + input handlers + leaderboard load.
-- **Class methods:** `spawnExo`, `spawnBoss`, UI updaters (`updateHPText`, `updateStaminaBar`, etc.), `startReload`, `triggerVictory`, `triggerGameOver`, `recordRunAndFormat`.
-- **`update()` order:** title gate → game-over gate → ESC pause toggle → reload tick → WASD → SPACE jump trigger → ALT dash trigger → SHIFT sprint check → stamina regen/drain → movement → jump arc → hit-flash tick → player/barrel/shadow render → exo chase + touch damage → bullets + collision → pickups → bursts → muzzle flashes → barrel orient + aim line → round/spawn/intermission flow.
+The file has a FILE MAP comment block at the top (lines 1-24) with exact line ranges. Major sections (line ranges as of last update — trust the FILE MAP if these drift):
+
+1. **Audio synth module** (25-75) — WebAudio context + `sfxShoot`/`sfxEnemyHit`/`sfxEnemyDeath`/`sfxPlayerHit`.
+2. **Combat constants** (76-128) — player, bullet, aim, exo spawn, `ENEMY_TYPES`, head/neck zone constants, spread/recoil.
+3. **Boss / round helpers** (129-176) — `BOSS_ROUNDS`/`BOSS_HP_TABLE`/`BOSS_SIZE_TABLE`/`BOSS_ATTACK_COOLDOWN_TABLE`, `hpForRound`, boss attack constants.
+4. **Enemy mix & spawn-rate helpers** (177-205) — `enemyMixForRound`, `pickEnemyTypeForRound`, `exoSpeedForRound`, `spawnIntervalForRound`, `EXO_TOUCH_COOLDOWN`, `PLAYER_MAX_HP`.
+5. **Leaderboard module** (206-269) — localStorage keys, sanitize/prompt/load/save, `addToLeaderboard`, `formatLeaderboard`.
+6. **Movement / visual / UI constants** (270-314) — dash, jump, stamina, sprint, player visuals, barrel, muzzle flash, round/intermission, hit burst, ammo/pickup.
+7. **Scene `init` + `create()`** (315-694) — `init(data)` reads `skipTitle`; `create()` builds camera/ground/player/barrel/shadow/HUD/title/pause/game-over and wires input + pointerdown fire.
+8. **UI/HUD updaters + reload** (695-737) — `updateHPText`, `updateStaminaBar`, `updateRoundText`, `updateKillsText`, `updateAmmoText`, `startReload`.
+9. **Pickup & burst spawners** (738-752) — `spawnAmmoPickup`, `spawnHitBurst`.
+10. **Round flow** (753-773) — `startIntermission`, `beginNextRound`.
+11. **Title & run recording** (774-825) — `refreshTitleText`, `startGameFromTitle`, `recordRunAndFormat`, `triggerVictory`, `triggerGameOver`.
+12. **Boss bar helpers** (826-838) — `updateBossBar`, `hideBossBar`.
+13. **Hit resolver + body-part helpers** (839-906) — `resolveHit` (neck → head → body zone detection + damage scaling), `buildBodyParts`, `destroyBodyParts`.
+14. **Enemy / boss / slime spawn** (907-1009) — `spawnBoss`, `spawnBossSlime`, `spawnExo`.
+15. **`update()` main loop** (1010-1432) — title gate → game-over gate → ESC pause → reload tick → WASD → SPACE jump trigger → ALT dash trigger → SHIFT sprint → stamina regen/drain → movement → jump arc → hit-flash tick → player/barrel/shadow render → round/intermission/spawn flow → enemy chase + touch damage + boss windup → slime loop → bullet loop (calls `resolveHit`) → pickups → bursts → muzzle flashes.
+16. **`drawAimLine()` PRE_RENDER** (1433-1450) — wired to Phaser `Scenes.Events.PRE_RENDER`; uses `cam.getWorldPoint` so the aim line doesn't lag camera lerp.
+
+## Working in GameScene.js
+
+- **Read the FILE MAP first** (lines 1-24 of `js/GameScene.js`) before doing anything else in that file. The map names every section and its current line range.
+- **Read by range, not whole-file.** Use Read with `offset`/`limit` to load only the section you need. Only read the entire file when the task genuinely requires it (cross-section refactors, full audits, structural reviews).
+- **If the FILE MAP is out of date** — section header line ranges don't match the map, or a section drifted because lines were added/removed elsewhere — fix the map (and the affected section headers) BEFORE any other work. A stale map is worse than no map.
+- **When adding code, place it inside the correct existing section.** Don't dump new helpers at the bottom of the class. After the edit, recompute the affected section's end line plus every later section's start/end, and update both the FILE MAP and the in-file section header comments to match the new line numbers.
+- **Don't split the file into multiple modules** without an explicit user-approved restructure step. The FILE MAP is the lightweight alternative to that split.
 
 ## Memory entries (auto-loaded from `~/.claude/projects/.../memory/`)
 
