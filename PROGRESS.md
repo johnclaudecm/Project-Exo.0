@@ -6,6 +6,53 @@ When a tuning pass spans multiple turns (e.g. "PLAYER_SPEED 12 → 9 → 6"), re
 
 ---
 
+## 2026-05-15 — Step 24: Hit-feel rework (fire-slow + knockback deleted, long-neck on Basic/Runner, 1.25× head on Mutant/Boss/Jimmy, shared resolveHit)
+**Built:** A single coherent hit-feel beat with a structural anti-spaghetti pass.
+
+*Fire-slow deletion:*
+- Removed constants `FIRE_MOVE_PENALTY` and `FIRE_PENALTY_DURATION`.
+- Removed `this.firePenaltyTimer` init, set-on-shot, decay block, and the `moveSpeed *= FIRE_MOVE_PENALTY` multiplier.
+- Result: walk-and-shoot equals walk-no-shoot; sprint-shoot equals sprint-no-shoot.
+
+*Knockback deletion:*
+- Removed constants `KNOCKBACK_BASE_SPEED`, `KNOCKBACK_DURATION`.
+- Removed `kbResistance` from all four enemy configs (basic/runner/mutant/boss).
+- Removed `kbVX`, `kbVY`, `kbTime`, `kbResistance` from `spawnExo` and `spawnBoss` enemy objects.
+- Removed the per-frame `if (e.kbTime > 0) { ... }` block that nudged enemies along the bullet vector.
+- Removed the on-hit knockback set inside the bullet collision loop.
+- Result: bullets never push enemies. (User's second-thought call — knockback simply isn't in the game right now.)
+
+*Long-neck weak-point on Basic + Runner only:*
+- Replaced the old `headColor` head-dot mechanic from Step 23. Old constants `HEAD_HIT_RADIUS`, `HEAD_VISUAL_RADIUS`, `HEAD_WORLD_OFFSET_X/Y` deleted.
+- `ENEMY_TYPES` now carries structured `head` / `neck` zone fields:
+  - basic: `head: null`, `neck: { offset: -0.30, hitRadius: 0.18, color: 0xff8080 }` — neck hit = **instakill**.
+  - runner: `head: null`, `neck: { offset: -0.30, hitRadius: 0.15, color: 0x80f0ff }` — neck hit = **instakill**.
+  - mutant: `head: { offset: -0.55, hitRadius: 0.30 }`, `neck: null` — head hit = **1.25× dmg**.
+  - boss: `head: { offset: -0.65, hitRadius: 0.45 }`, `neck: null` — head hit = **1.25× dmg**.
+- Boss head/neck offsets and radii scale by `sizeMult` at spawn so the larger boss tiers have a proportionally larger head target.
+- New top-of-file constants: `HEAD_DAMAGE_MULT = 1.25`, `NECK_INSTAKILL = true`, plus visual sizing constants (`ENEMY_HEAD_VISUAL_OFFSET = -0.40`, `ENEMY_HEAD_VISUAL_SCALE = 0.55`, `ENEMY_ARM_W_PX/H_PX/DX_PX`, `NECK_VISUAL_W_PX/H_PX`).
+
+*Visual primitives (placeholder, minimal):*
+- Every enemy now spawns a body ellipse + head ellipse + 2 arm rectangles via `buildBodyParts(cfg)`. Basic/Runner additionally get a small lighter-shade neck rectangle between body and head (the visual cue for the instakill zone).
+- Head color reuses the per-config `headColor` field as a slightly lighter shade for silhouette readability.
+- Per-frame render block positions head + arms + (neck) by converting the body's world position + per-zone offset through `worldToScreen`, with arms screen-px offset and depth-sorted +0.04 / +0.045 / +0.05 above the body so they draw on top.
+- Death cleanup destroys body parts via `destroyBodyParts(e.parts)`.
+
+*Symmetric body+head on Mutant, Boss, and Jimmy:*
+- Player object gets `this.player.hitRadius`, `this.player.head = { offset, hitRadius }`, `this.player.neck = null` in `create()` so the shared resolver works on Jimmy too.
+- Boss-spit projectile collision routes through `resolveHit(this.player, sl.worldX, sl.worldY, BOSS_SLIME_DAMAGE)` — slime hitting head zone deals 1.25× = 2.5 dmg; body = 2 dmg. The old `BOSS_SLIME_HIT_RADIUS` constant was deleted since the player's `hitRadius` (0.5) now serves that role.
+- Exo touch routes through `resolveHit(this.player, e.worldX, e.worldY, e.damage, 'body')` with `zoneOverride='body'` since touch is bodily contact, not a precision strike.
+
+*Anti-spaghetti core — `resolveHit`:*
+- Single method on GameScene that takes `(target, hitWX, hitWY, baseDamage, zoneOverride?)` and returns `{ hitZone, damageDealt, isInstakill }`.
+- Zone detection order: neck (if present) → head (if present) → body. First zone whose distance check passes wins.
+- Bullet→enemy and player-damage paths both call it. The hit math lives in exactly one place; future enemies or attacks become config changes, not new code paths.
+
+**Tested:** Passed playtest 2026-05-15 — "all works well." Step 22 (boss HP/hitbox) and Step 23 (barrel/aim sync) implicitly confirmed too since they were untouched and survived the same session.
+**Decisions (locked):** Knockback is removed from the game, not paused. Fire-slow is removed entirely. Long-neck instakill is exclusive to Basic + Runner; Mutant + Boss + Jimmy share a body-plus-head model where head = 1.25× dmg. Touch attacks always resolve to body damage. All new tunables live in the constants block at the top of the file. The `resolveHit` helper is the only place hit-zone logic lives; do not duplicate it.
+
+---
+
 ## 2026-05-14 — Step 23: Headshot weak-point + barrel/aim-line desync fix
 **Built:** Two pieces of playtest feedback in one pass.
 

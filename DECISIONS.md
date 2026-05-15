@@ -21,3 +21,4 @@ Choices that have been made and are **NOT** to be revisited. One line each, date
 - 2026-05-14 — Build cadence: one numbered step at a time, Plan Mode first, STOP after each for user testing.
 - 2026-05-14 — Jump grants touch-damage immunity during the airborne arc (realism call; user did not object).
 - 2026-05-14 — Stamina is the only gate for dash (no separate cooldown). Dash and jump cannot overlap with each other.
+- 2026-05-15 — Step 24: Knockback removed entirely. Fire-slow removed entirely. Long-neck instakill weak-point on Basic + Runner only. Mutant, Boss, and Jimmy share a body+head model where head = 1.25× damage (HEAD_DAMAGE_MULT). Touch attacks always resolve to body damage. Single shared `resolveHit` helper is the source of truth — do not duplicate hit-zone logic.

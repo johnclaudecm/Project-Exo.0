@@ -69,16 +69,28 @@ const EXO_SPAWN_INTERVAL_FLOOR = 0.6;
 const EXO_MAX_ALIVE = 30;
 
 const ENEMY_TYPES = {
-  basic:  { w: 22, h: 11, color: 0xc23838, headColor: 0xff8080, hp: 1, speedMult: 1.0, damage: 1, hitRadius: 0.6, touchRadius: 0.6, kbResistance: 1.0 },
-  runner: { w: 16, h: 8,  color: 0x30dfff, headColor: 0x80f0ff, hp: 1, speedMult: 1.6, damage: 1, hitRadius: 0.5, touchRadius: 0.5, kbResistance: 1.2 },
-  mutant: { w: 34, h: 17, color: 0xb040ff, headColor: 0xd080ff, hp: 3, speedMult: 0.6, damage: 2, hitRadius: 0.9, touchRadius: 0.9, kbResistance: 0.5 },
-  boss:   { w: 80, h: 40, color: 0x80c040, headColor: null,     hp: 0, speedMult: 0.3, damage: 3, hitRadius: 1.1, touchRadius: 0.95, kbResistance: 0.0 },
+  basic:  { w: 22, h: 11, color: 0xc23838, headColor: 0xff8080, hp: 1, speedMult: 1.0, damage: 1, hitRadius: 0.6,  touchRadius: 0.6,
+            head: null,                                  neck: { offset: -0.30, hitRadius: 0.18, color: 0xff8080 } },
+  runner: { w: 16, h: 8,  color: 0x30dfff, headColor: 0x80f0ff, hp: 1, speedMult: 1.6, damage: 1, hitRadius: 0.5,  touchRadius: 0.5,
+            head: null,                                  neck: { offset: -0.30, hitRadius: 0.15, color: 0x80f0ff } },
+  mutant: { w: 34, h: 17, color: 0xb040ff, headColor: 0xd080ff, hp: 3, speedMult: 0.6, damage: 2, hitRadius: 0.9,  touchRadius: 0.9,
+            head: { offset: -0.55, hitRadius: 0.30 },    neck: null },
+  boss:   { w: 80, h: 40, color: 0x80c040, headColor: 0x90d050, hp: 0, speedMult: 0.3, damage: 3, hitRadius: 1.1,  touchRadius: 0.95,
+            head: { offset: -0.65, hitRadius: 0.45 },    neck: null },
 };
 
-const HEAD_WORLD_OFFSET_X = -0.3;
-const HEAD_WORLD_OFFSET_Y = -0.3;
-const HEAD_HIT_RADIUS = 0.3;
-const HEAD_VISUAL_RADIUS = 3;
+const HEAD_DAMAGE_MULT = 1.25;
+const NECK_INSTAKILL = true;
+const ENEMY_HEAD_VISUAL_OFFSET = -0.40;
+const ENEMY_HEAD_VISUAL_SCALE = 0.55;
+const ENEMY_ARM_W_PX = 3;
+const ENEMY_ARM_H_PX = 6;
+const ENEMY_ARM_DX_PX = 8;
+const NECK_VISUAL_W_PX = 3;
+const NECK_VISUAL_H_PX = 6;
+const PLAYER_HIT_RADIUS = 0.5;
+const PLAYER_HEAD_OFFSET = -0.55;
+const PLAYER_HEAD_HIT_RADIUS = 0.30;
 
 const SPREAD_WALK = 3;
 const SPREAD_SPRINT = 8;
@@ -87,10 +99,6 @@ const SPREAD_DASH = 4;
 const RECOIL_ADD = 5;
 const RECOIL_DECAY = 0.3;
 const SPREAD_CAP = 15;
-const FIRE_MOVE_PENALTY = 0.7;
-const FIRE_PENALTY_DURATION = 0.2;
-const KNOCKBACK_BASE_SPEED = 1.5;
-const KNOCKBACK_DURATION = 0.15;
 
 const BOSS_ROUNDS = [3, 6, 9, 10];
 const BOSS_HP_TABLE = [25, 60, 110, 200];
@@ -136,7 +144,6 @@ const BOSS_WINDUP_COLOR = 0xc0ff60;
 const BOSS_SLIME_SPEED = 8.0;
 const BOSS_SLIME_DAMAGE = 2;
 const BOSS_SLIME_RADIUS = 8;
-const BOSS_SLIME_HIT_RADIUS = 0.5;
 const BOSS_SLIME_MAX_LIFE = 2.5;
 const BOSS_SLIME_COLOR = 0xa8e040;
 
@@ -308,6 +315,9 @@ class GameScene extends Phaser.Scene {
     this.player = this.add.ellipse(0, 0, PLAYER_W, PLAYER_H, PLAYER_COLOR);
     this.player.worldX = WORLD_TILES / 2;
     this.player.worldY = WORLD_TILES / 2;
+    this.player.hitRadius = PLAYER_HIT_RADIUS;
+    this.player.head = { offset: PLAYER_HEAD_OFFSET, hitRadius: PLAYER_HEAD_HIT_RADIUS };
+    this.player.neck = null;
     const initS = worldToScreen(this.player.worldX, this.player.worldY);
     this.player.x = initS.x;
     this.player.y = initS.y;
@@ -383,7 +393,6 @@ class GameScene extends Phaser.Scene {
 
     this.hitFlashTimer = 0;
     this.recoilTime = 0;
-    this.firePenaltyTimer = 0;
 
     const uiCam = this.cameras.add(0, 0, this.scale.width, this.scale.height);
     uiCam.setName('ui');
@@ -627,7 +636,6 @@ class GameScene extends Phaser.Scene {
         dy = Math.sin(a);
       }
       this.recoilTime = RECOIL_DECAY;
-      this.firePenaltyTimer = FIRE_PENALTY_DURATION;
 
       const gfx = this.add.circle(0, 0, BULLET_RADIUS, BULLET_COLOR);
       this.uiCam.ignore(gfx);
@@ -792,6 +800,73 @@ class GameScene extends Phaser.Scene {
     this.bossLabel.setVisible(false);
   }
 
+  resolveHit(target, hitWX, hitWY, baseDamage, zoneOverride) {
+    let zone = zoneOverride || null;
+    if (!zone) {
+      if (target.neck) {
+        const nx = target.worldX + target.neck.offset;
+        const ny = target.worldY + target.neck.offset;
+        const ndx = hitWX - nx;
+        const ndy = hitWY - ny;
+        if (ndx * ndx + ndy * ndy <= target.neck.hitRadius * target.neck.hitRadius) {
+          zone = 'neck';
+        }
+      }
+      if (!zone && target.head) {
+        const hx = target.worldX + target.head.offset;
+        const hy = target.worldY + target.head.offset;
+        const hdx = hitWX - hx;
+        const hdy = hitWY - hy;
+        if (hdx * hdx + hdy * hdy <= target.head.hitRadius * target.head.hitRadius) {
+          zone = 'head';
+        }
+      }
+      if (!zone) {
+        const bdx = hitWX - target.worldX;
+        const bdy = hitWY - target.worldY;
+        if (bdx * bdx + bdy * bdy <= target.hitRadius * target.hitRadius) {
+          zone = 'body';
+        }
+      }
+    }
+    if (!zone) return { hitZone: null, damageDealt: 0, isInstakill: false };
+    if (zone === 'neck' && NECK_INSTAKILL) {
+      return { hitZone: 'neck', damageDealt: baseDamage, isInstakill: true };
+    }
+    if (zone === 'head') {
+      return { hitZone: 'head', damageDealt: baseDamage * HEAD_DAMAGE_MULT, isInstakill: false };
+    }
+    return { hitZone: 'body', damageDealt: baseDamage, isInstakill: false };
+  }
+
+  buildBodyParts(cfg) {
+    const parts = {};
+    const headColor = (cfg.headColor != null) ? cfg.headColor : cfg.color;
+    const headW = Math.max(4, Math.round(cfg.w * ENEMY_HEAD_VISUAL_SCALE));
+    const headH = Math.max(3, Math.round(cfg.h * ENEMY_HEAD_VISUAL_SCALE));
+    parts.head = this.add.ellipse(0, 0, headW, headH, headColor);
+    this.uiCam.ignore(parts.head);
+    parts.armL = this.add.rectangle(0, 0, ENEMY_ARM_W_PX, ENEMY_ARM_H_PX, cfg.color);
+    parts.armR = this.add.rectangle(0, 0, ENEMY_ARM_W_PX, ENEMY_ARM_H_PX, cfg.color);
+    this.uiCam.ignore(parts.armL);
+    this.uiCam.ignore(parts.armR);
+    if (cfg.neck) {
+      parts.neck = this.add.rectangle(0, 0, NECK_VISUAL_W_PX, NECK_VISUAL_H_PX, cfg.neck.color || headColor);
+      this.uiCam.ignore(parts.neck);
+    } else {
+      parts.neck = null;
+    }
+    return parts;
+  }
+
+  destroyBodyParts(parts) {
+    if (!parts) return;
+    if (parts.head) parts.head.destroy();
+    if (parts.armL) parts.armL.destroy();
+    if (parts.armR) parts.armR.destroy();
+    if (parts.neck) parts.neck.destroy();
+  }
+
   spawnBoss() {
     const edge = Math.floor(Math.random() * 4);
     let wx, wy;
@@ -805,8 +880,13 @@ class GameScene extends Phaser.Scene {
     const gfx = this.add.ellipse(0, 0, cfg.w, cfg.h, cfg.color);
     gfx.setScale(sizeMult);
     this.uiCam.ignore(gfx);
+    const parts = this.buildBodyParts(cfg);
+    if (parts.head) parts.head.setScale(sizeMult);
+    if (parts.armL) parts.armL.setScale(sizeMult);
+    if (parts.armR) parts.armR.setScale(sizeMult);
     const boss = {
       gfx,
+      parts,
       worldX: wx,
       worldY: wy,
       touchTimer: 0,
@@ -816,6 +896,9 @@ class GameScene extends Phaser.Scene {
       damage: cfg.damage,
       hitRadius: cfg.hitRadius * sizeMult,
       touchRadius: cfg.touchRadius * sizeMult,
+      head: cfg.head ? { offset: cfg.head.offset * sizeMult, hitRadius: cfg.head.hitRadius * sizeMult } : null,
+      neck: cfg.neck ? { offset: cfg.neck.offset * sizeMult, hitRadius: cfg.neck.hitRadius * sizeMult } : null,
+      cfg,
       type: 'boss',
       attackCooldown: 0,
       windupTime: 0,
@@ -823,10 +906,6 @@ class GameScene extends Phaser.Scene {
       windupTarget: null,
       baseColor: cfg.color,
       sizeMult,
-      kbVX: 0,
-      kbVY: 0,
-      kbTime: 0,
-      kbResistance: cfg.kbResistance,
     };
     this.exos.push(boss);
     this.boss = boss;
@@ -869,28 +948,24 @@ class GameScene extends Phaser.Scene {
     const cfg = ENEMY_TYPES[type];
     const gfx = this.add.ellipse(0, 0, cfg.w, cfg.h, cfg.color);
     this.uiCam.ignore(gfx);
-    let headGfx = null;
-    if (cfg.headColor !== null && cfg.headColor !== undefined) {
-      headGfx = this.add.circle(0, 0, HEAD_VISUAL_RADIUS, cfg.headColor);
-      this.uiCam.ignore(headGfx);
-    }
+    const parts = this.buildBodyParts(cfg);
+    const hp = hpForRound(type, this.roundNumber);
     this.exos.push({
       gfx,
-      headGfx,
+      parts,
       worldX: wx,
       worldY: wy,
       touchTimer: 0,
       speed: exoSpeedForRound(this.roundNumber) * cfg.speedMult,
-      hp: hpForRound(type, this.roundNumber),
-      maxHp: hpForRound(type, this.roundNumber),
+      hp,
+      maxHp: hp,
       damage: cfg.damage,
       hitRadius: cfg.hitRadius,
       touchRadius: cfg.touchRadius,
+      head: cfg.head ? { offset: cfg.head.offset, hitRadius: cfg.head.hitRadius } : null,
+      neck: cfg.neck ? { offset: cfg.neck.offset, hitRadius: cfg.neck.hitRadius } : null,
+      cfg,
       type,
-      kbVX: 0,
-      kbVY: 0,
-      kbTime: 0,
-      kbResistance: cfg.kbResistance,
     });
   }
 
@@ -1022,8 +1097,7 @@ class GameScene extends Phaser.Scene {
     } else if (wasdLen > 0) {
       vx /= wasdLen;
       vy /= wasdLen;
-      let moveSpeed = sprinting ? PLAYER_SPEED * SPRINT_MULT : PLAYER_SPEED;
-      if (this.firePenaltyTimer > 0) moveSpeed *= FIRE_MOVE_PENALTY;
+      const moveSpeed = sprinting ? PLAYER_SPEED * SPRINT_MULT : PLAYER_SPEED;
       const step = moveSpeed * dt;
       this.player.worldX += vx * step;
       this.player.worldY += vy * step;
@@ -1053,10 +1127,6 @@ class GameScene extends Phaser.Scene {
     if (this.recoilTime > 0) {
       this.recoilTime -= dt;
       if (this.recoilTime < 0) this.recoilTime = 0;
-    }
-    if (this.firePenaltyTimer > 0) {
-      this.firePenaltyTimer -= dt;
-      if (this.firePenaltyTimer < 0) this.firePenaltyTimer = 0;
     }
 
     const s = worldToScreen(this.player.worldX, this.player.worldY);
@@ -1101,14 +1171,7 @@ class GameScene extends Phaser.Scene {
       let edx = this.player.worldX - e.worldX;
       let edy = this.player.worldY - e.worldY;
       const elen = Math.hypot(edx, edy);
-      if (e.kbTime > 0) {
-        e.worldX += e.kbVX * dt;
-        e.worldY += e.kbVY * dt;
-        e.worldX = Phaser.Math.Clamp(e.worldX, 0, WORLD_TILES);
-        e.worldY = Phaser.Math.Clamp(e.worldY, 0, WORLD_TILES);
-        e.kbTime -= dt;
-        if (e.kbTime < 0) e.kbTime = 0;
-      } else if (elen > 0) {
+      if (elen > 0) {
         edx /= elen;
         edy /= elen;
         e.worldX += edx * e.speed * dt;
@@ -1116,16 +1179,19 @@ class GameScene extends Phaser.Scene {
       }
       if (e.touchTimer > 0) e.touchTimer -= dt;
       if (elen <= e.touchRadius && e.touchTimer <= 0 && this.jumpTime <= 0) {
-        this.playerHP -= e.damage;
-        e.touchTimer = EXO_TOUCH_COOLDOWN;
-        this.hitFlashTimer = HIT_FLASH_DURATION;
-        this.player.setFillStyle(PLAYER_HIT_COLOR);
-        sfxPlayerHit();
-        this.updateHPText();
-        if (this.playerHP <= 0) {
-          this.playerHP = 0;
+        const touchResult = this.resolveHit(this.player, e.worldX, e.worldY, e.damage, 'body');
+        if (touchResult.hitZone) {
+          this.playerHP -= touchResult.damageDealt;
+          e.touchTimer = EXO_TOUCH_COOLDOWN;
+          this.hitFlashTimer = HIT_FLASH_DURATION;
+          this.player.setFillStyle(PLAYER_HIT_COLOR);
+          sfxPlayerHit();
           this.updateHPText();
-          this.triggerGameOver();
+          if (this.playerHP <= 0) {
+            this.playerHP = 0;
+            this.updateHPText();
+            this.triggerGameOver();
+          }
         }
       }
       if (e.type === 'boss') {
@@ -1155,11 +1221,30 @@ class GameScene extends Phaser.Scene {
       e.gfx.x = es.x;
       e.gfx.y = es.y;
       e.gfx.depth = e.worldX + e.worldY;
-      if (e.headGfx) {
-        const hs = worldToScreen(e.worldX + HEAD_WORLD_OFFSET_X, e.worldY + HEAD_WORLD_OFFSET_Y);
-        e.headGfx.x = hs.x;
-        e.headGfx.y = hs.y;
-        e.headGfx.depth = e.worldX + e.worldY + 0.05;
+      if (e.parts) {
+        const headOff = e.head ? e.head.offset : ENEMY_HEAD_VISUAL_OFFSET;
+        const hs = worldToScreen(e.worldX + headOff, e.worldY + headOff);
+        if (e.parts.head) {
+          e.parts.head.x = hs.x;
+          e.parts.head.y = hs.y;
+          e.parts.head.depth = e.worldX + e.worldY + 0.05;
+        }
+        if (e.parts.armL) {
+          e.parts.armL.x = es.x - ENEMY_ARM_DX_PX * (e.sizeMult || 1);
+          e.parts.armL.y = es.y;
+          e.parts.armL.depth = e.worldX + e.worldY + 0.04;
+        }
+        if (e.parts.armR) {
+          e.parts.armR.x = es.x + ENEMY_ARM_DX_PX * (e.sizeMult || 1);
+          e.parts.armR.y = es.y;
+          e.parts.armR.depth = e.worldX + e.worldY + 0.04;
+        }
+        if (e.parts.neck && e.neck) {
+          const ns = worldToScreen(e.worldX + e.neck.offset, e.worldY + e.neck.offset);
+          e.parts.neck.x = ns.x;
+          e.parts.neck.y = ns.y;
+          e.parts.neck.depth = e.worldX + e.worldY + 0.045;
+        }
       }
     }
 
@@ -1177,22 +1262,23 @@ class GameScene extends Phaser.Scene {
         this.slimes.splice(i, 1);
         continue;
       }
-      const pdx = this.player.worldX - sl.worldX;
-      const pdy = this.player.worldY - sl.worldY;
-      if (pdx * pdx + pdy * pdy <= BOSS_SLIME_HIT_RADIUS * BOSS_SLIME_HIT_RADIUS && this.jumpTime <= 0) {
-        this.playerHP -= BOSS_SLIME_DAMAGE;
-        this.hitFlashTimer = HIT_FLASH_DURATION;
-        this.player.setFillStyle(PLAYER_HIT_COLOR);
-        sfxPlayerHit();
-        this.updateHPText();
-        sl.gfx.destroy();
-        this.slimes.splice(i, 1);
-        if (this.playerHP <= 0) {
-          this.playerHP = 0;
+      if (this.jumpTime <= 0) {
+        const slimeResult = this.resolveHit(this.player, sl.worldX, sl.worldY, BOSS_SLIME_DAMAGE);
+        if (slimeResult.hitZone) {
+          this.playerHP -= slimeResult.damageDealt;
+          this.hitFlashTimer = HIT_FLASH_DURATION;
+          this.player.setFillStyle(PLAYER_HIT_COLOR);
+          sfxPlayerHit();
           this.updateHPText();
-          this.triggerGameOver();
+          sl.gfx.destroy();
+          this.slimes.splice(i, 1);
+          if (this.playerHP <= 0) {
+            this.playerHP = 0;
+            this.updateHPText();
+            this.triggerGameOver();
+          }
+          continue;
         }
-        continue;
       }
       const sls = worldToScreen(sl.worldX, sl.worldY);
       sl.gfx.x = sls.x;
@@ -1217,50 +1303,34 @@ class GameScene extends Phaser.Scene {
       let hit = false;
       for (let j = this.exos.length - 1; j >= 0; j--) {
         const e = this.exos[j];
-        let headHit = false;
-        if (e.headGfx) {
-          const hdx = b.worldX - (e.worldX + HEAD_WORLD_OFFSET_X);
-          const hdy = b.worldY - (e.worldY + HEAD_WORLD_OFFSET_Y);
-          if (hdx * hdx + hdy * hdy <= HEAD_HIT_RADIUS * HEAD_HIT_RADIUS) {
-            headHit = true;
-          }
+        const result = this.resolveHit(e, b.worldX, b.worldY, 1);
+        if (!result.hitZone) continue;
+        if (result.isInstakill) {
+          e.hp = 0;
+        } else {
+          e.hp -= result.damageDealt;
         }
-        const ddx = b.worldX - e.worldX;
-        const ddy = b.worldY - e.worldY;
-        const bodyHit = (ddx * ddx + ddy * ddy <= e.hitRadius * e.hitRadius);
-        if (headHit || bodyHit) {
-          if (headHit) {
-            e.hp = 0;
-          } else {
-            e.hp -= 1;
+        this.spawnHitBurst(e.worldX, e.worldY);
+        if (e === this.boss) this.updateBossBar();
+        if (e.hp <= 0) {
+          sfxEnemyDeath();
+          if (e.type !== 'boss' && Math.random() < AMMO_DROP_CHANCE) {
+            this.spawnAmmoPickup(e.worldX, e.worldY);
           }
-          if (e.kbResistance > 0) {
-            e.kbVX = b.vx * KNOCKBACK_BASE_SPEED * e.kbResistance;
-            e.kbVY = b.vy * KNOCKBACK_BASE_SPEED * e.kbResistance;
-            e.kbTime = KNOCKBACK_DURATION;
+          if (e === this.boss) {
+            this.boss = null;
+            this.hideBossBar();
           }
-          this.spawnHitBurst(e.worldX, e.worldY);
-          if (e === this.boss) this.updateBossBar();
-          if (e.hp <= 0) {
-            sfxEnemyDeath();
-            if (e.type !== 'boss' && Math.random() < AMMO_DROP_CHANCE) {
-              this.spawnAmmoPickup(e.worldX, e.worldY);
-            }
-            if (e === this.boss) {
-              this.boss = null;
-              this.hideBossBar();
-            }
-            e.gfx.destroy();
-            if (e.headGfx) e.headGfx.destroy();
-            this.exos.splice(j, 1);
-            this.kills += 1;
-            this.updateKillsText();
-          } else {
-            sfxEnemyHit();
-          }
-          hit = true;
-          break;
+          e.gfx.destroy();
+          this.destroyBodyParts(e.parts);
+          this.exos.splice(j, 1);
+          this.kills += 1;
+          this.updateKillsText();
+        } else {
+          sfxEnemyHit();
         }
+        hit = true;
+        break;
       }
       if (hit) {
         b.gfx.destroy();
