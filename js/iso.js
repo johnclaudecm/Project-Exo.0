@@ -1,6 +1,6 @@
 const TILE_W = 64;
 const TILE_H = 32;
-const WORLD_TILES = 40;
+const WORLD_TILES = 60;
 
 function worldToScreen(worldX, worldY) {
   return {

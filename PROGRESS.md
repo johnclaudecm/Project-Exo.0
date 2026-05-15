@@ -6,6 +6,249 @@ When a tuning pass spans multiple turns (e.g. "PLAYER_SPEED 12 → 9 → 6"), re
 
 ---
 
+## 2026-05-15 — Step 26 sub-step 4: Player audio triggers + per-frame sound queue
+**Built:** Player actions now push sound events onto the AI queue. Nothing consumes them yet (`updateExoAI` still a stub), so gameplay is unchanged — but the data is flowing. Sub-step 5 will fill in the consumer.
+
+*Shoot emit (§7, in pointerdown fire handler right after `sfxShoot()`):*
+- `emitSound(this, this.player.worldX, this.player.worldY, SOUND_LOUDNESS_SHOOT)` — one push per shot. Loudness 15 tiles.
+
+*Sprint / walk throttled emits (§15, inside the WASD movement block, gated on `wasdLen > 0` so silence-while-stationary works automatically):*
+- If `sprinting`: increment `this.aiSprintSoundTimer` by dt; when ≥ `SOUND_SPRINT_EMIT_INTERVAL` (0.5s), push at SOUND_LOUDNESS_SPRINT (9 tiles), reset timer.
+- Else (walking): increment `this.aiWalkSoundTimer` by dt; when ≥ `SOUND_WALK_EMIT_INTERVAL` (0.8s), push at SOUND_LOUDNESS_WALK (4 tiles), reset timer.
+- Dash + jump deliberately silent (commented in code). Dash is fast and short, jump is brief — both fall into "no emit" by intent.
+
+*End-of-frame flush (§15, after muzzle-flash cleanup):*
+- `this.aiSoundEvents.length = 0;` — events live one frame.
+
+`emitSound` itself in ExoAI.js was already functional from sub-step 2 (single-line push). All five sound constants (SHOOT/SPRINT/WALK loudness + SPRINT/WALK interval) already declared in ExoAI.js §2 (also from sub-step 2).
+
+**Pending playtest:** game should still behave like sub-step 3 — exos chase via the old math, respawn works. The only invisible difference: every frame, `this.aiSoundEvents` accumulates entries from player actions and gets flushed at the end. If you wanted to verify it's working, you could open DevTools (F12) and add a console.log inside `emitSound` — would print one line per shoot, one per 0.5s of sprint, one per 0.8s of walk. Or just trust the syntax check.
+
+**Line shift:** +17 lines total. §7 +1 (pointerdown emit), §15 +16 internal (14 sprint/walk block + 2 flush). FILE MAP and §7-§16 headers all updated. `node -c` parses clean.
+
+---
+
+## 2026-05-15 — Step 26 sub-step 3: Data wiring (perception + per-exo AI fields + initExoAI call)
+**Built:** Pure data plumbing. New AI helpers in ExoAI.js still un-called by gameplay logic; this step just gives them the data they'll need.
+
+*`ENEMY_TYPES` (§2) — each type now has a nested `perception` block:*
+- basic:  `{ sightRange: 8,  sightFOV: 1.4, hearingMult: 1.0, chaseSpeedMult: 1.4, wanderSpeedMult: 0.5 }`
+- runner: `{ sightRange: 7,  sightFOV: 1.3, hearingMult: 1.6, chaseSpeedMult: 1.6, wanderSpeedMult: 0.5 }` (worse sight, much better hearing, faster chase)
+- mutant: `{ sightRange: 12, sightFOV: 1.8, hearingMult: 0.6, chaseSpeedMult: 1.2, wanderSpeedMult: 0.5 }` (best sight, widest FOV, deaf-ish, slow)
+- boss:   copies basic (parked, but won't crash AI if ever spawned)
+
+*`spawnExo` + `spawnBoss` (§14) — each pushed exo now carries 6 AI state fields:*
+- `aiState: AI_STATE_WANDER` (initial)
+- `aiTargetWX: null`, `aiTargetWY: null` (first AI tick will pick a wander target)
+- `aiStateTimer: 0`
+- `aiFacing: Math.atan2(WORLD_TILES/2 - wy, WORLD_TILES/2 - wx)` (face toward map center so edge-spawned exos don't immediately wander off-map)
+- `aiSoundPriority: 0` (for "louder/closer sound preempts current investigate" math in sub-step 5)
+
+State constants reuse `AI_STATE_WANDER`/`INVESTIGATE`/`CHASE`/`SEARCH` from ExoAI.js — accessible because ExoAI.js loads first per `index.html`. Typos crash with `ReferenceError`.
+
+*`create()` (§7) — `initExoAI(this)` call added* after the sandbox state init block. `initExoAI` is functional (not a stub) — sets up `scene.aiSoundEvents = []`, `scene.aiSprintSoundTimer = 0`, `scene.aiWalkSoundTimer = 0`, `scene.aiDebugOverlay = false`, `scene.aiDebugLabels = []`. Scene-side state now exists for sub-step 4 (sound queue) and sub-step 7 (debug overlay) to consume.
+
+**Pending playtest:** game should behave exactly like sub-step 2 — title, sandbox, exos chase via the OLD math (which still runs unchanged), respawn works. The only invisible difference is that each exo now has 6 unused fields and the scene has 5 unused properties. If the game booting after this means ENEMY_TYPES still parses correctly + spawnExo/spawnBoss don't error on the new fields.
+
+**Line shift:** +18 lines total. §2 +4 (4 perception blocks), §7 +2 (initExoAI call), §14 +12 (6 fields × 2 spawn sites). FILE MAP + §2-§16 headers updated. Both files syntax-check clean with `node -c`.
+
+---
+
+## 2026-05-15 — Side fix (reverted): F-key suppression → letter-key debug convention
+**Built then reverted:** Briefly added `addCapture('F1,F3,F4,F5,F6,F7,F8,F9,F10,F11')` to suppress Edge's F1-help hijack. User responded that F-keys don't work reliably for in-game tools and asked to use letter keys instead (U/I/O/P). Reverted the F-key capture. GameScene.js back to pre-fix line counts; FILE MAP + headers §7-§16 unwound.
+
+**New convention:** Debug tool keys live on U/I/O/P (letters), not F1-F12. F12 stays uncaptured for DevTools. Sub-step 7 will bind **O** = AI debug overlay (Overlay) — letter keys don't need addCapture since they don't have browser defaults to suppress on a page with focus.
+
+**DevTools access:** F12 (or Ctrl+Shift+I) — uncaptured, works as normal.
+
+**Plan file updated:** all F2 references → O-key. ExoAI.js section §7 header renamed "F2 DEBUG OVERLAY" → "O-KEY DEBUG OVERLAY". CLAUDE.md notes the convention in the current-step tracker.
+
+**Net code shift after revert:** zero in GameScene.js. +2 lines in ExoAI.js (clarifying comment in §7 stub).
+
+---
+
+## 2026-05-15 — Step 26 sub-step 2: `js/ExoAI.js` skeleton + wired into index.html
+**Built:** Empty-shell module for the perception AI. 124 lines, 7 internal sections, its own FILE MAP. File loads via `index.html` (order: phaser → iso → **ExoAI** → GameScene → main) but nothing in GameScene calls it yet, so behavior is identical to sub-step 1.
+
+*`js/ExoAI.js` structure:*
+1. **AI / PERCEPTION CONSTANTS** (lines 24-39) — `AI_WANDER_RADIUS`, `AI_WANDER_PAUSE_MIN/MAX`, `AI_SEARCH_RADIUS`, `AI_SEARCH_DURATION`, `AI_ARRIVAL_DIST`, `AI_INVESTIGATE_PAUSE`. Plus state-string constants `AI_STATE_WANDER`/`INVESTIGATE`/`CHASE`/`SEARCH` so typos crash loudly with a ReferenceError instead of silent state drift.
+2. **SOUND CONSTANTS** (lines 40-49) — `SOUND_LOUDNESS_SHOOT=15`, `SOUND_LOUDNESS_SPRINT=9`, `SOUND_LOUDNESS_WALK=4`, `SOUND_SPRINT_EMIT_INTERVAL=0.5`, `SOUND_WALK_EMIT_INTERVAL=0.8`.
+3. **SCENE INIT HOOK** (lines 50-61) — `initExoAI(scene)`: sets up `scene.aiSoundEvents = []`, `scene.aiSprintSoundTimer = 0`, `scene.aiWalkSoundTimer = 0`, `scene.aiDebugOverlay = false`, `scene.aiDebugLabels = []`. Functional (not stubbed) — sub-step 3 will call it from `create()`.
+4. **SOUND EMISSION** (lines 62-69) — `emitSound(scene, wx, wy, loudness)`: pushes onto the queue. Functional. Sub-step 4 calls it from player audio sites.
+5. **PER-FRAME AI DISPATCH** (lines 70-84) — `updateExoAI(scene, e, dt)`: STUB. Sub-step 5 implements the state machine. LOS-occlusion assumption documented in the function-level comment so it's not forgotten when terrain lands.
+6. **INTERNAL AI HELPERS** (lines 85-107) — `aiCheckSight`, `aiReachedTarget`, `aiPickWanderTarget`, `aiConsumeSounds`: STUBS for sub-step 5.
+7. **F2 DEBUG OVERLAY** (lines 108-124) — `drawAIDebugOverlay(scene)`: partial. When `scene.aiDebugOverlay === false`, hides all pooled labels (correctly handles the off-state already so toggling later doesn't leave stale labels). Sub-step 7 fills in the cone+ring+label drawing.
+
+*`index.html` change:* added `<script src="js/ExoAI.js"></script>` between `iso.js` and `GameScene.js`. Single-line insertion.
+
+*`CLAUDE.md` updates:* current-step tracker advanced; project layout entry for ExoAI.js (no longer "planned"); new "Working in ExoAI.js" section that mirrors the GameScene.js rules; addendum to the "don't split the file" rule documenting this approved exception.
+
+**Pending playtest:** game should run identically to sub-step 1 — title, sandbox, exos, respawn all unchanged. The only observable difference is one extra HTTP request for the new JS file at page load. If ExoAI.js has a syntax error the whole game won't boot — that's the main thing to confirm (does the title screen come up).
+
+**Line shift:** none in GameScene.js. ExoAI.js is brand new — its FILE MAP block + 7 section headers all aligned and verified.
+
+---
+
+## 2026-05-15 — Step 26 sub-step 1: Map resize WORLD_TILES 40 → 60
+**Built:** First sub-step of the perception-AI + bigger-map step. Pure constant-bumps + respawn-point rewrite — no behavioral change beyond "everything got bigger."
+
+*`js/iso.js`:* `WORLD_TILES` 40 → 60. One-line constant change.
+
+*`js/GameScene.js` (§2):*
+- `SANDBOX_MAX_ALIVE` 12 → 22 (proportional to 2.25× area).
+- `SANDBOX_RESPAWN_POINTS` rewritten for 60×60: center (30,30) + four quadrants (15,15), (45,15), (15,45), (45,45).
+- Stale comment on line 105 ("WORLD_TILES is 40") updated to 60.
+
+*WORLD_TILES verification (the "don't take on faith" ask):* greped all 18 `WORLD_TILES` references in `GameScene.js` plus the iso.js definition. Every reference uses the constant in a math expression — no hardcoded 40s anywhere that need updating. Sites confirmed:
+- Camera centering (line 345): `cam.centerOn(0, (WORLD_TILES * TILE_H) / 2)` — scales. Initial cam Y = 960 (was 640).
+- Ground render corners (lines 348-350): `worldToScreen(WORLD_TILES, ...)` — diamond stretches from (-1920, 0) to (1920, 1920) screen px.
+- Player spawn (lines 364-365): `WORLD_TILES / 2` = (30, 30). Screens to (0, 960) — exactly where camera centers on frame 1.
+- Player clamps × 2 (lines 1201-1202 WASD, 1212-1213 dash): `Phaser.Math.Clamp(.., 0, WORLD_TILES)` — scales.
+- Boss spawn edges (lines 979-982): all `WORLD_TILES` / `WORLD_TILES / 2` — scale.
+- Exo spawn edges (lines 1047-1051): `Math.random() * WORLD_TILES` + edge wrap — scale.
+- Slime bounds (lines 1371-1372) + Bullet bounds (lines 1410-1411): out-of-bounds destroy — scale.
+
+*Hardcoded `40` literals in GameScene.js (verified unrelated to map size):* boss sprite height (`h: 40` px, line 121), ENEMY_HEAD_VISUAL_OFFSET (-0.40 multiplier, line 127), boss HP bar Y coordinate (`barY = 40` screen px, line 520). None reference map dimensions.
+
+*Camera has no `setBounds`* — just `setZoom(0.75)` + `startFollow`. Camera bounds are implicit (follow + lerp). No bounds update needed.
+
+**Line shift:** zero. Same line count in both files. No FILE MAP changes.
+
+**Pending playtest:** the "walk every edge" check the user explicitly asked for. Things to confirm visually:
+- Player spawns near the middle of the bigger diamond on game start (world (30,30) → screen (0,960)).
+- Walk to all four corners (0,0), (60,0), (60,60), (0,60). Ground extends the full way to each corner without seams.
+- The "old boundary" at world coord 40 should no longer feel like an edge — keep walking past it.
+- Die multiple times: respawn should pick from the five new safe points, not the old (10,10)-style coords.
+- 22-exo cap fills the bigger map without feeling cramped.
+- Camera follows smoothly to all corners — no whip, no void exposure beyond what was present before (corners always show some off-diamond void at zoom 0.75; this is unchanged from 40×40 state).
+
+**Plan reference:** `C:\Users\JohnClaudeDev\.claude\plans\temporal-brewing-yeti.md`.
+
+**Memory updated:** [[project_exo_map_too_small]] now records the expansion as resolved.
+
+---
+
+## 2026-05-15 — Project direction shift: SHELL-FIRST phase begins
+**Decision:** Stop building toward any specific game mode. Build a playable shell (core systems clean, assets in, runnable as sandbox, no win/lose) first. Mode work (rounds, scoring, objectives) resumes only when user signals "shell is done, game mode now." During shell phase, mode-coupled code stays **parked in-place** — present but uncalled — not deleted. When mode work resumes, it layers on top of core systems without rewriting them.
+
+**Approved shell task list (priority order):**
+1. Sandbox runtime swap (replace round-driven path with flat sandbox spawner; F1 god mode; respawn on death).
+2. Core-feel pass on movement + shooting + camera (tuning only).
+3. Asset pipeline end-to-end with one real character/tile/weapon-sound/footstep.
+4. Enemy config decoupling audit (split round-scaling from core config).
+5. Small open map expansion (resolves long-deferred `project_exo_map_too_small`).
+
+**Parked code (mode-coupled, do not extend):** round flow (`startIntermission`/`beginNextRound`, BOSS_ROUNDS + scaling tables, round-scaled mix/speed/spawn-rate helpers), leaderboard module, `triggerVictory`/`triggerGameOver`/`recordRunAndFormat`, round-counter HUD framing, boss HP bar UI. Code stays untouched and ready to revive.
+
+**Tested:** N/A — this is a scope decision, not a code change.
+
+---
+
+## 2026-05-15 — Step 25 sub-task 1.3 (revised): Multi-spawn respawn on death
+**Initial implementation had a problem:** single fixed spawn point at map center + no invuln frames → if enemies camped the center, respawning into instant death was possible. User flagged this strongly: "DO NOT MAKE ANY CHANGES LIKE THIS THATS CRAZY > MAKE SURE I APPROVE THEM FIRST." Justified — that was a feel-affecting design call, not an implementation detail, and I extrapolated from `project_exo_hardcore_feel` ("no damage iframes") to defend a silent decision. Saved [[project-exo-approve-design-calls]] feedback memory: don't extrapolate from existing rules to make feel calls without explicit approval.
+
+**Revised approach (approved):** multiple spawn points + "pick the safest one." No invuln frames stays — but spawn-point selection now avoids the camping problem.
+
+*New constant in §2:* `SANDBOX_RESPAWN_POINTS` — editable array of `{ wx, wy }` entries. Five default points on the 40×40 map: center `(20,20)` + four quadrant centers `(10,10)`, `(30,10)`, `(10,30)`, `(30,30)`. Comment explicitly documents that the user owns this list and can add/move/remove points without touching logic.
+
+*New helper `pickSafestRespawnPoint()` (§10):* for each candidate point, computes the min distance to any alive enemy; returns the candidate with the **max** min-distance. Deterministic — same enemy positions always yield the same pick. If no enemies are alive, the first array entry wins.
+
+*`respawnPlayer()` (§10):* calls `pickSafestRespawnPoint()`, then runs the same state reset as before (HP/position/stamina/jump/dash + HUD). One shared helper per concern — picker is separate from state-reset.
+
+**What this fixes:** dying immediately on respawn is now only possible if every single defined spawn point is closer to an enemy than safe distance — and the user controls the spawn-point set, so that's a user-tunable knob, not a hidden hazard.
+
+**Still under hardcore-feel rule:** zero invuln frames. Open question if you want a brief grace later — flagged here for revisit.
+
+**Both HP=0 sites in §15 still branch the same way:** `sandboxMode → respawnPlayer()` else `triggerGameOver()`.
+
+**Pending playtest:** die to an enemy; expect to teleport to whichever defined spawn point is farthest from the nearest exo. Should never land on top of an enemy unless you've crowded all 5 points.
+
+**Line shift:** +27 lines total this revision (replaced 2-line `SANDBOX_RESPAWN_WX/WY` with 11-line array+comment for +9; new `pickSafestRespawnPoint` + 1-line tweak to `respawnPlayer` for +18). FILE MAP and §2-16 section headers updated.
+
+**Feedback memory added to MEMORY.md index:** `project_exo_approve_design_calls`.
+
+---
+
+## 2026-05-15 — Step 25 sub-task 1.3 (initial): Respawn on death — superseded
+**Built:** `respawnPlayer()` helper + branched both HP=0 sites so sandbox mode respawns the player instead of triggering game over. No invuln frames, no grace period — single fixed spawn point at `(WORLD_TILES/2, WORLD_TILES/2)`.
+
+**Superseded same-day by the multi-spawn revision above** — single-spawn was unplayable when enemies camped the center.
+
+*New helper `respawnPlayer()` (§10, after `sandboxSpawnTick`):*
+- `playerHP = PLAYER_MAX_HP`
+- `player.worldX = SANDBOX_RESPAWN_WX`, `player.worldY = SANDBOX_RESPAWN_WY`
+- syncs screen coords via `worldToScreen` (next frame would catch it via the per-frame transform, but immediate sync avoids one-frame ghost at the prior position)
+- `stamina = STAMINA_MAX`, `jumpTime = 0`, `dashTime = 0` — cancels in-flight arc state so respawning mid-jump or mid-dash doesn't carry over
+- `updateHPText()` + `updateStaminaBar()` — HUD reflects reset
+- `hitFlashTimer` left alone — auto-decays in `<0.2s` via the existing tick
+
+*Branched HP=0 sites (§15):*
+- Exo touch (~line 1273): `if (this.sandboxMode) this.respawnPlayer(); else this.triggerGameOver();`
+- Slime hit (~line 1358): same branch.
+
+*Section §10 rename:* "ROUND FLOW + SANDBOX SPAWN" → "ROUND FLOW + SANDBOX SPAWN/RESPAWN" — groups both sandbox lifecycle helpers in one place.
+
+*What's now fully unreachable in sandbox mode:* `triggerGameOver`, `triggerVictory`, `recordRunAndFormat`, `addToLeaderboard`, the entire `gameOver` UI block. They remain present in the code, untouched, ready to revive when mode work resumes.
+
+**Pending playtest on 1.3:** drop HP to zero (let an exo touch you 5 times). Expected — player teleports to map center with full HP and full stamina, fight continues; no GAME OVER screen, no leaderboard prompt. If exos are camped at the respawn point you'll just die again immediately.
+
+**Line shift:** +16 lines total (14 from `respawnPlayer`, 2 from HP=0 site branching). FILE MAP and §10-16 section headers updated.
+
+---
+
+## 2026-05-15 — Step 25 sub-task 1.2: Sandbox path active; round flow parked at call sites
+**Built:** Wired three gates on `this.sandboxMode` so the sandbox spawner replaces the round-driven path. Round-flow code remains present and untouched but unreachable while `sandboxMode=true`.
+
+*Gate A — `updateRoundText` (§8):* early-returns with empty string when `sandboxMode`. Round HUD text hidden in sandbox; kills text stays (it's a stat, not mode mechanic).
+
+*Gate B — `refreshTitleText` (§11):* in sandbox mode, sets prompt to "Press SPACE or ENTER to start sandbox" and clears the leaderboard text. Title (PROJECT EXO) + subtext ("isometric wave shooter") left alone — cosmetic only.
+
+*Gate C — spawn flow in `update()` (§15):* wrapped the round-driven spawn block in `if (this.sandboxMode) { this.sandboxSpawnTick(dt); } else { /* existing block, indented +2 */ }`. Existing block (betweenRounds tick, bossSpawnPending, roundSpawnsRemaining, ROUND_TOTAL victory check, startIntermission) is unchanged inside the else branch — diffs only as indentation + brace wrapping.
+
+*Unreachable in sandbox mode after 1.2:* `startIntermission`, `beginNextRound`, `spawnBoss`, `triggerVictory`. `triggerGameOver` still reachable (HP=0 path) — handled in 1.3.
+
+*`startGameFromTitle` left untouched* — it only sets `phase='PLAYING'`, no round-init call. Mode-agnostic.
+
+**Confirmed playtest-pass on 1.1 (prior):** "runs good bro" — identical behavior to last commit before sandboxMode activated.
+
+**Pending playtest on 1.2:** sandbox should run on start — title says "start sandbox," round HUD empty, basic + runner enemies spawn at flat 1.5s interval up to 12 alive, no bosses, no intermission text, no victory after 10 rounds. Death still triggers GAME OVER screen (fixed in 1.3).
+
+**Line shift:** +10 lines total. FILE MAP and §8-16 section headers updated.
+
+---
+
+## 2026-05-15 — Step 25 sub-task 1.1: Sandbox spawner wired but inactive
+**Built:** First sub-task of the sandbox runtime swap. New code only — no behavior change yet.
+
+*Constants (§2, after `EXO_MAX_ALIVE`):*
+- `SANDBOX_SPAWN_INTERVAL = 1.5` (seconds between spawns)
+- `SANDBOX_MAX_ALIVE = 12`
+- `SANDBOX_SPAWN_POOL = ['basic', 'runner']` (uniform random pick; Mutant held out by design; array easy to extend)
+- `SANDBOX_ENEMY_BASE_SPEED = EXO_SPEED_BASE` (named alias — sandbox enemy speed never scales)
+- `SANDBOX_RESPAWN_WX = WORLD_TILES / 2`, `SANDBOX_RESPAWN_WY = WORLD_TILES / 2` (matches current `create()` spawn coords)
+
+*Scene state init (§7 `create()`, alongside `exoSpawnTimer`):*
+- `this.sandboxMode = true`
+- `this.sandboxSpawnTimer = 0`
+
+*New method `sandboxSpawnTick(deltaSec)` (§10):*
+- Returns early if alive exo count >= `SANDBOX_MAX_ALIVE`.
+- Increments `sandboxSpawnTimer`; spawns when interval elapsed.
+- Picks type uniformly from `SANDBOX_SPAWN_POOL`.
+- Calls `this.spawnExo({ type, hp: cfg.hp, speed: SANDBOX_ENEMY_BASE_SPEED * cfg.speedMult })` — no round-scaling.
+- Section renamed: "ROUND FLOW" → "ROUND FLOW + SANDBOX SPAWN" (covers both flows).
+
+*Refactor `spawnExo()` → `spawnExo(opts = {})`:*
+- Optional `{ type, hp, speed }`. Each defaults to its prior round-driven expression.
+- Round path still calls `this.spawnExo()` with no args → identical behavior.
+- Sandbox path passes explicit values, bypasses round helpers.
+
+*FILE MAP + section headers + CLAUDE.md GameScene structure section all updated to the new line ranges (+21 lines total).*
+
+**Tested:** Not yet playtested. Sub-task is intentionally dead code — `sandboxSpawnTick` is never called, `sandboxMode` is never read. Game must behave identically to last commit. Pending user diff review + "identical behavior" confirmation before sub-task 1.2.
+
+---
+
 ## 2026-05-15 — Step 24: Hit-feel rework (fire-slow + knockback deleted, long-neck on Basic/Runner, 1.25× head on Mutant/Boss/Jimmy, shared resolveHit)
 **Built:** A single coherent hit-feel beat with a structural anti-spaghetti pass.
 

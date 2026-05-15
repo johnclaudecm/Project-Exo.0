@@ -5,21 +5,21 @@
 // the section headers below so ranges stay accurate.
 // ============================================================
 //  1. AUDIO SYNTH MODULE                  (lines 25-75)
-//  2. COMBAT CONSTANTS                    (lines 76-128)
-//  3. BOSS / ROUND HELPERS                (lines 129-176)
-//  4. ENEMY MIX & SPAWN-RATE HELPERS      (lines 177-205)
-//  5. LEADERBOARD MODULE                  (lines 206-269)
-//  6. MOVEMENT / VISUAL / UI CONSTANTS    (lines 270-314)
-//  7. SCENE: init + create() setup        (lines 315-694)
-//  8. UI/HUD UPDATERS + RELOAD            (lines 695-737)
-//  9. PICKUP & BURST SPAWNERS             (lines 738-752)
-// 10. ROUND FLOW (intermission/next)      (lines 753-773)
-// 11. TITLE & RUN RECORDING               (lines 774-825)
-// 12. BOSS BAR HELPERS                    (lines 826-838)
-// 13. HIT RESOLVER + BODY-PART HELPERS    (lines 839-906)
-// 14. ENEMY / BOSS / SLIME SPAWN          (lines 907-1009)
-// 15. update() main loop                  (lines 1010-1432)
-// 16. drawAimLine() PRE_RENDER            (lines 1433-1450)
+//  2. COMBAT CONSTANTS + SANDBOX SPAWN    (lines 76-149)
+//  3. BOSS / ROUND HELPERS                (lines 150-197)
+//  4. ENEMY MIX & SPAWN-RATE HELPERS      (lines 198-226)
+//  5. LEADERBOARD MODULE                  (lines 227-290)
+//  6. MOVEMENT / VISUAL / UI CONSTANTS    (lines 291-335)
+//  7. SCENE: init + create() setup        (lines 336-721)
+//  8. UI/HUD UPDATERS + RELOAD            (lines 722-765)
+//  9. PICKUP & BURST SPAWNERS             (lines 766-780)
+// 10. ROUND FLOW + SANDBOX SPAWN/RESPAWN  (lines 781-843)
+// 11. TITLE & RUN RECORDING               (lines 844-900)
+// 12. BOSS BAR HELPERS                    (lines 901-913)
+// 13. HIT RESOLVER + BODY-PART HELPERS    (lines 914-981)
+// 14. ENEMY / BOSS / SLIME SPAWN          (lines 982-1097)
+// 15. update() main loop                  (lines 1098-1542)
+// 16. drawAimLine() PRE_RENDER            (lines 1543-1559)
 // ============================================================
 
 // ===== 1. AUDIO SYNTH MODULE (lines 25-75) =====
@@ -73,7 +73,7 @@ function sfxEnemyHit()    { tone(420, 0.05, 'square', 0.08, 300); }
 function sfxEnemyDeath()  { tone(150, 0.18, 'sawtooth', 0.12, 70); }
 function sfxPlayerHit()   { tone(110, 0.22, 'sawtooth', 0.18, 55); }
 
-// ===== 2. COMBAT CONSTANTS (lines 76-128) =====
+// ===== 2. COMBAT CONSTANTS + SANDBOX SPAWN (lines 76-149) =====
 const PLAYER_SPEED = 6;
 const PLAYER_W = 24;
 const PLAYER_H = 12;
@@ -94,15 +94,36 @@ const EXO_SPAWN_INTERVAL_PER_ROUND = 0.07;
 const EXO_SPAWN_INTERVAL_FLOOR = 0.6;
 const EXO_MAX_ALIVE = 30;
 
+// Sandbox spawn (shell phase — replaces round-driven spawn)
+const SANDBOX_SPAWN_INTERVAL = 1.5;
+const SANDBOX_MAX_ALIVE = 22;
+const SANDBOX_SPAWN_POOL = ['basic', 'runner'];
+const SANDBOX_ENEMY_BASE_SPEED = EXO_SPEED_BASE;
+// Sandbox respawn points — edit this list to add/move/remove spawn locations.
+// On respawn, the point with the greatest min-distance to any alive enemy is chosen,
+// so the player always lands at whichever defined point is currently safest.
+// Coords are in world tiles (0..WORLD_TILES on each axis). WORLD_TILES is 60.
+const SANDBOX_RESPAWN_POINTS = [
+  { wx: 30, wy: 30 },  // center
+  { wx: 15, wy: 15 },  // NW quadrant
+  { wx: 45, wy: 15 },  // NE quadrant
+  { wx: 15, wy: 45 },  // SW quadrant
+  { wx: 45, wy: 45 },  // SE quadrant
+];
+
 const ENEMY_TYPES = {
   basic:  { w: 22, h: 11, color: 0xc23838, headColor: 0xff8080, hp: 1, speedMult: 1.0, damage: 1, hitRadius: 0.6,  touchRadius: 0.6,
-            head: null,                                  neck: { offset: -0.30, hitRadius: 0.18, color: 0xff8080 } },
+            head: null,                                  neck: { offset: -0.30, hitRadius: 0.18, color: 0xff8080 },
+            perception: { sightRange: 8,  sightFOV: 1.4, hearingMult: 1.0, chaseSpeedMult: 1.4, wanderSpeedMult: 0.5 } },
   runner: { w: 16, h: 8,  color: 0x30dfff, headColor: 0x80f0ff, hp: 1, speedMult: 1.6, damage: 1, hitRadius: 0.5,  touchRadius: 0.5,
-            head: null,                                  neck: { offset: -0.30, hitRadius: 0.15, color: 0x80f0ff } },
+            head: null,                                  neck: { offset: -0.30, hitRadius: 0.15, color: 0x80f0ff },
+            perception: { sightRange: 7,  sightFOV: 1.3, hearingMult: 1.6, chaseSpeedMult: 1.6, wanderSpeedMult: 0.5 } },
   mutant: { w: 34, h: 17, color: 0xb040ff, headColor: 0xd080ff, hp: 3, speedMult: 0.6, damage: 2, hitRadius: 0.9,  touchRadius: 0.9,
-            head: { offset: -0.55, hitRadius: 0.30 },    neck: null },
+            head: { offset: -0.55, hitRadius: 0.30 },    neck: null,
+            perception: { sightRange: 12, sightFOV: 1.8, hearingMult: 0.6, chaseSpeedMult: 1.2, wanderSpeedMult: 0.5 } },
   boss:   { w: 80, h: 40, color: 0x80c040, headColor: 0x90d050, hp: 0, speedMult: 0.3, damage: 3, hitRadius: 1.1,  touchRadius: 0.95,
-            head: { offset: -0.65, hitRadius: 0.45 },    neck: null },
+            head: { offset: -0.65, hitRadius: 0.45 },    neck: null,
+            perception: { sightRange: 8,  sightFOV: 1.4, hearingMult: 1.0, chaseSpeedMult: 1.4, wanderSpeedMult: 0.5 } },
 };
 
 const HEAD_DAMAGE_MULT = 1.25;
@@ -126,7 +147,7 @@ const RECOIL_ADD = 5;
 const RECOIL_DECAY = 0.3;
 const SPREAD_CAP = 15;
 
-// ===== 3. BOSS / ROUND HELPERS (lines 129-176) =====
+// ===== 3. BOSS / ROUND HELPERS (lines 150-197) =====
 const BOSS_ROUNDS = [3, 6, 9, 10];
 const BOSS_HP_TABLE = [25, 60, 110, 200];
 const BOSS_SIZE_TABLE = [1.0, 1.4, 1.8, 2.2];
@@ -174,7 +195,7 @@ const BOSS_SLIME_RADIUS = 8;
 const BOSS_SLIME_MAX_LIFE = 2.5;
 const BOSS_SLIME_COLOR = 0xa8e040;
 
-// ===== 4. ENEMY MIX & SPAWN-RATE HELPERS (lines 177-205) =====
+// ===== 4. ENEMY MIX & SPAWN-RATE HELPERS (lines 198-226) =====
 function enemyMixForRound(n) {
   if (n <= 2) return [['basic', 1.0]];
   if (n <= 5) return [['basic', 0.70], ['runner', 0.30]];
@@ -203,7 +224,7 @@ const EXO_TOUCH_COOLDOWN = 1.0;
 
 const PLAYER_MAX_HP = 5;
 
-// ===== 5. LEADERBOARD MODULE (lines 206-269) =====
+// ===== 5. LEADERBOARD MODULE (lines 227-290) =====
 const USERNAME_KEY = 'projectExoUsername';
 const LEADERBOARD_KEY = 'projectExoLeaderboard';
 const LEADERBOARD_MAX = 10;
@@ -267,7 +288,7 @@ function formatLeaderboard(board, highlightEntry) {
   return lines.join('\n');
 }
 
-// ===== 6. MOVEMENT / VISUAL / UI CONSTANTS (lines 270-314) =====
+// ===== 6. MOVEMENT / VISUAL / UI CONSTANTS (lines 291-335) =====
 const DASH_DISTANCE = 2.0;
 const DASH_DURATION = 0.18;
 
@@ -312,7 +333,7 @@ const AMMO_PICKUP_W = 10;
 const AMMO_PICKUP_H = 10;
 const AMMO_PICKUP_COLOR = 0xffe066;
 
-// ===== 7. SCENE: init + create() setup (lines 315-694) =====
+// ===== 7. SCENE: init + create() setup (lines 336-721) =====
 class GameScene extends Phaser.Scene {
   constructor() {
     super({ key: 'GameScene' });
@@ -391,6 +412,11 @@ class GameScene extends Phaser.Scene {
     this.exos = [];
     this.exoSpawnTimer = 0;
     this.slimes = [];
+
+    this.sandboxMode = true;
+    this.sandboxSpawnTimer = 0;
+
+    initExoAI(this);
 
     this.roundNumber = START_ROUND;
     this.roundSpawnsRemaining = exosForRound(this.roundNumber);
@@ -681,6 +707,7 @@ class GameScene extends Phaser.Scene {
       this.ammo -= 1;
       this.updateAmmoText();
       sfxShoot();
+      emitSound(this, this.player.worldX, this.player.worldY, SOUND_LOUDNESS_SHOOT);
 
       const angle = Math.atan2(cursorWorldPx.y - this.player.y, cursorWorldPx.x - this.player.x);
       const mx = this.player.x + Math.cos(angle) * BARREL_LENGTH;
@@ -692,7 +719,7 @@ class GameScene extends Phaser.Scene {
     });
   }
 
-  // ===== 8. UI/HUD UPDATERS + RELOAD (lines 695-737) =====
+  // ===== 8. UI/HUD UPDATERS + RELOAD (lines 722-765) =====
   updateHPText() {
     this.hpText.setText('HP: ' + this.playerHP + ' / ' + PLAYER_MAX_HP);
   }
@@ -707,6 +734,7 @@ class GameScene extends Phaser.Scene {
   }
 
   updateRoundText() {
+    if (this.sandboxMode) { this.roundText.setText(''); return; }
     this.roundText.setText('Round ' + this.roundNumber + ' / ' + ROUND_TOTAL);
   }
 
@@ -735,7 +763,7 @@ class GameScene extends Phaser.Scene {
     this.updateAmmoText();
   }
 
-  // ===== 9. PICKUP & BURST SPAWNERS (lines 738-752) =====
+  // ===== 9. PICKUP & BURST SPAWNERS (lines 766-780) =====
   spawnAmmoPickup(worldX, worldY) {
     const gfx = this.add.rectangle(0, 0, AMMO_PICKUP_W, AMMO_PICKUP_H, AMMO_PICKUP_COLOR);
     this.uiCam.ignore(gfx);
@@ -750,7 +778,7 @@ class GameScene extends Phaser.Scene {
     this.bursts.push({ gfx, life: HIT_BURST_LIFE, total: HIT_BURST_LIFE });
   }
 
-  // ===== 10. ROUND FLOW (intermission/next) (lines 753-773) =====
+  // ===== 10. ROUND FLOW + SANDBOX SPAWN/RESPAWN (lines 781-843) =====
   startIntermission() {
     this.betweenRounds = true;
     this.intermissionTimer = ROUND_INTERMISSION;
@@ -771,8 +799,55 @@ class GameScene extends Phaser.Scene {
     this.updateRoundText();
   }
 
-  // ===== 11. TITLE & RUN RECORDING (lines 774-825) =====
+  sandboxSpawnTick(deltaSec) {
+    if (this.exos.length >= SANDBOX_MAX_ALIVE) return;
+    this.sandboxSpawnTimer += deltaSec;
+    if (this.sandboxSpawnTimer < SANDBOX_SPAWN_INTERVAL) return;
+    this.sandboxSpawnTimer = 0;
+    const type = SANDBOX_SPAWN_POOL[Math.floor(Math.random() * SANDBOX_SPAWN_POOL.length)];
+    const cfg = ENEMY_TYPES[type];
+    this.spawnExo({ type, hp: cfg.hp, speed: SANDBOX_ENEMY_BASE_SPEED * cfg.speedMult });
+  }
+
+  pickSafestRespawnPoint() {
+    let bestPoint = SANDBOX_RESPAWN_POINTS[0];
+    let bestMinDist = -1;
+    for (const pt of SANDBOX_RESPAWN_POINTS) {
+      let minDist = Infinity;
+      for (const e of this.exos) {
+        const d = Math.hypot(pt.wx - e.worldX, pt.wy - e.worldY);
+        if (d < minDist) minDist = d;
+      }
+      if (minDist > bestMinDist) {
+        bestMinDist = minDist;
+        bestPoint = pt;
+      }
+    }
+    return bestPoint;
+  }
+
+  respawnPlayer() {
+    const pt = this.pickSafestRespawnPoint();
+    this.playerHP = PLAYER_MAX_HP;
+    this.player.worldX = pt.wx;
+    this.player.worldY = pt.wy;
+    const s = worldToScreen(this.player.worldX, this.player.worldY);
+    this.player.x = s.x;
+    this.player.y = s.y;
+    this.stamina = STAMINA_MAX;
+    this.jumpTime = 0;
+    this.dashTime = 0;
+    this.updateHPText();
+    this.updateStaminaBar();
+  }
+
+  // ===== 11. TITLE & RUN RECORDING (lines 844-900) =====
   refreshTitleText() {
+    if (this.sandboxMode) {
+      this.titleLeaderboard.setText('');
+      this.titlePrompt.setText('Press SPACE or ENTER to start sandbox');
+      return;
+    }
     const board = loadLeaderboard();
     const lbText = board.length === 0
       ? '(no scores yet — be the first)'
@@ -823,7 +898,7 @@ class GameScene extends Phaser.Scene {
     this.recordRunAndFormat('GAME OVER', '#ff5555');
   }
 
-  // ===== 12. BOSS BAR HELPERS (lines 826-838) =====
+  // ===== 12. BOSS BAR HELPERS (lines 901-913) =====
   updateBossBar() {
     if (!this.boss) return;
     const frac = Math.max(0, this.boss.hp / this.boss.maxHp);
@@ -836,7 +911,7 @@ class GameScene extends Phaser.Scene {
     this.bossLabel.setVisible(false);
   }
 
-  // ===== 13. HIT RESOLVER + BODY-PART HELPERS (lines 839-906) =====
+  // ===== 13. HIT RESOLVER + BODY-PART HELPERS (lines 914-981) =====
   resolveHit(target, hitWX, hitWY, baseDamage, zoneOverride) {
     let zone = zoneOverride || null;
     if (!zone) {
@@ -904,7 +979,7 @@ class GameScene extends Phaser.Scene {
     if (parts.neck) parts.neck.destroy();
   }
 
-  // ===== 14. ENEMY / BOSS / SLIME SPAWN (lines 907-1009) =====
+  // ===== 14. ENEMY / BOSS / SLIME SPAWN (lines 982-1097) =====
   spawnBoss() {
     const edge = Math.floor(Math.random() * 4);
     let wx, wy;
@@ -944,6 +1019,12 @@ class GameScene extends Phaser.Scene {
       windupTarget: null,
       baseColor: cfg.color,
       sizeMult,
+      aiState: AI_STATE_WANDER,
+      aiTargetWX: null,
+      aiTargetWY: null,
+      aiStateTimer: 0,
+      aiFacing: Math.atan2(WORLD_TILES / 2 - wy, WORLD_TILES / 2 - wx),
+      aiSoundPriority: 0,
     };
     this.exos.push(boss);
     this.boss = boss;
@@ -974,7 +1055,7 @@ class GameScene extends Phaser.Scene {
     });
   }
 
-  spawnExo() {
+  spawnExo(opts = {}) {
     const edge = Math.floor(Math.random() * 4);
     const t = Math.random() * WORLD_TILES;
     let wx, wy;
@@ -982,19 +1063,20 @@ class GameScene extends Phaser.Scene {
     else if (edge === 1) { wx = WORLD_TILES; wy = t; }
     else if (edge === 2) { wx = t; wy = WORLD_TILES; }
     else { wx = 0; wy = t; }
-    const type = pickEnemyTypeForRound(this.roundNumber);
+    const type = opts.type !== undefined ? opts.type : pickEnemyTypeForRound(this.roundNumber);
     const cfg = ENEMY_TYPES[type];
     const gfx = this.add.ellipse(0, 0, cfg.w, cfg.h, cfg.color);
     this.uiCam.ignore(gfx);
     const parts = this.buildBodyParts(cfg);
-    const hp = hpForRound(type, this.roundNumber);
+    const hp = opts.hp !== undefined ? opts.hp : hpForRound(type, this.roundNumber);
+    const speed = opts.speed !== undefined ? opts.speed : exoSpeedForRound(this.roundNumber) * cfg.speedMult;
     this.exos.push({
       gfx,
       parts,
       worldX: wx,
       worldY: wy,
       touchTimer: 0,
-      speed: exoSpeedForRound(this.roundNumber) * cfg.speedMult,
+      speed,
       hp,
       maxHp: hp,
       damage: cfg.damage,
@@ -1004,10 +1086,16 @@ class GameScene extends Phaser.Scene {
       neck: cfg.neck ? { offset: cfg.neck.offset, hitRadius: cfg.neck.hitRadius } : null,
       cfg,
       type,
+      aiState: AI_STATE_WANDER,
+      aiTargetWX: null,
+      aiTargetWY: null,
+      aiStateTimer: 0,
+      aiFacing: Math.atan2(WORLD_TILES / 2 - wy, WORLD_TILES / 2 - wx),
+      aiSoundPriority: 0,
     });
   }
 
-  // ===== 15. update() main loop (lines 1010-1432) =====
+  // ===== 15. update() main loop (lines 1098-1542) =====
   update(time, delta) {
     const k = this.keys;
     const dtPre = delta / 1000;
@@ -1142,6 +1230,20 @@ class GameScene extends Phaser.Scene {
       this.player.worldY += vy * step;
       this.player.worldX = Phaser.Math.Clamp(this.player.worldX, 0, WORLD_TILES);
       this.player.worldY = Phaser.Math.Clamp(this.player.worldY, 0, WORLD_TILES);
+      // Throttled hearing emit for AI (sub-step 4). Dash/jump don't emit on purpose.
+      if (sprinting) {
+        this.aiSprintSoundTimer += dt;
+        if (this.aiSprintSoundTimer >= SOUND_SPRINT_EMIT_INTERVAL) {
+          this.aiSprintSoundTimer = 0;
+          emitSound(this, this.player.worldX, this.player.worldY, SOUND_LOUDNESS_SPRINT);
+        }
+      } else {
+        this.aiWalkSoundTimer += dt;
+        if (this.aiWalkSoundTimer >= SOUND_WALK_EMIT_INTERVAL) {
+          this.aiWalkSoundTimer = 0;
+          emitSound(this, this.player.worldX, this.player.worldY, SOUND_LOUDNESS_WALK);
+        }
+      }
     }
 
     let jumpHeight = 0;
@@ -1178,29 +1280,33 @@ class GameScene extends Phaser.Scene {
       this.shadow.depth = this.player.worldX + this.player.worldY - 0.01;
     }
 
-    if (this.betweenRounds) {
-      this.intermissionTimer -= dt;
-      if (this.intermissionTimer <= 0) {
-        this.beginNextRound();
-      }
+    if (this.sandboxMode) {
+      this.sandboxSpawnTick(dt);
     } else {
-      if (this.bossSpawnPending) {
-        this.bossSpawnPending = false;
-        this.spawnBoss();
-      }
-      if (this.roundSpawnsRemaining > 0) {
-        this.exoSpawnTimer += dt;
-        const interval = spawnIntervalForRound(this.roundNumber);
-        if (this.exoSpawnTimer >= interval && this.exos.length < EXO_MAX_ALIVE) {
-          this.exoSpawnTimer = 0;
-          this.spawnExo();
-          this.roundSpawnsRemaining -= 1;
+      if (this.betweenRounds) {
+        this.intermissionTimer -= dt;
+        if (this.intermissionTimer <= 0) {
+          this.beginNextRound();
         }
-      } else if (this.exos.length === 0) {
-        if (this.roundNumber >= ROUND_TOTAL) {
-          this.triggerVictory();
-        } else {
-          this.startIntermission();
+      } else {
+        if (this.bossSpawnPending) {
+          this.bossSpawnPending = false;
+          this.spawnBoss();
+        }
+        if (this.roundSpawnsRemaining > 0) {
+          this.exoSpawnTimer += dt;
+          const interval = spawnIntervalForRound(this.roundNumber);
+          if (this.exoSpawnTimer >= interval && this.exos.length < EXO_MAX_ALIVE) {
+            this.exoSpawnTimer = 0;
+            this.spawnExo();
+            this.roundSpawnsRemaining -= 1;
+          }
+        } else if (this.exos.length === 0) {
+          if (this.roundNumber >= ROUND_TOTAL) {
+            this.triggerVictory();
+          } else {
+            this.startIntermission();
+          }
         }
       }
     }
@@ -1229,7 +1335,8 @@ class GameScene extends Phaser.Scene {
           if (this.playerHP <= 0) {
             this.playerHP = 0;
             this.updateHPText();
-            this.triggerGameOver();
+            if (this.sandboxMode) this.respawnPlayer();
+            else this.triggerGameOver();
           }
         }
       }
@@ -1314,7 +1421,8 @@ class GameScene extends Phaser.Scene {
           if (this.playerHP <= 0) {
             this.playerHP = 0;
             this.updateHPText();
-            this.triggerGameOver();
+            if (this.sandboxMode) this.respawnPlayer();
+            else this.triggerGameOver();
           }
           continue;
         }
@@ -1428,9 +1536,11 @@ class GameScene extends Phaser.Scene {
       f.gfx.setAlpha(f.life / f.total);
     }
 
+    // Flush per-frame AI sound queue (sub-step 4). Events live one frame.
+    this.aiSoundEvents.length = 0;
   }
 
-  // ===== 16. drawAimLine() PRE_RENDER (lines 1433-1450) =====
+  // ===== 16. drawAimLine() PRE_RENDER (lines 1543-1559) =====
   drawAimLine() {
     if (!this.aimLine || !this.player) return;
     this.aimLine.clear();
