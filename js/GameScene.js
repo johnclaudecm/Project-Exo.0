@@ -9,17 +9,17 @@
 //  3. BOSS / ROUND HELPERS                (lines 150-197)
 //  4. ENEMY MIX & SPAWN-RATE HELPERS      (lines 198-226)
 //  5. LEADERBOARD MODULE                  (lines 227-290)
-//  6. MOVEMENT / VISUAL / UI CONSTANTS    (lines 291-335)
-//  7. SCENE: init + create() setup        (lines 336-721)
-//  8. UI/HUD UPDATERS + RELOAD            (lines 722-765)
-//  9. PICKUP & BURST SPAWNERS             (lines 766-780)
-// 10. ROUND FLOW + SANDBOX SPAWN/RESPAWN  (lines 781-843)
-// 11. TITLE & RUN RECORDING               (lines 844-900)
-// 12. BOSS BAR HELPERS                    (lines 901-913)
-// 13. HIT RESOLVER + BODY-PART HELPERS    (lines 914-981)
-// 14. ENEMY / BOSS / SLIME SPAWN          (lines 982-1097)
-// 15. update() main loop                  (lines 1098-1542)
-// 16. drawAimLine() PRE_RENDER            (lines 1543-1559)
+//  6. MOVEMENT / VISUAL / UI CONSTANTS    (lines 291-341)
+//  7. SCENE: init + preload + create()    (lines 342-768)
+//  8. UI/HUD UPDATERS + RELOAD            (lines 769-812)
+//  9. PICKUP & BURST SPAWNERS             (lines 813-828)
+// 10. ROUND FLOW + SANDBOX SPAWN/RESPAWN  (lines 829-903)
+// 11. TITLE & RUN RECORDING               (lines 904-960)
+// 12. BOSS BAR HELPERS                    (lines 961-973)
+// 13. HIT RESOLVER + BODY-PART HELPERS    (lines 974-1041)
+// 14. ENEMY / BOSS / SLIME SPAWN          (lines 1042-1159)
+// 15. update() main loop                  (lines 1160-1600)
+// 16. drawAimLine() PRE_RENDER            (lines 1601-1618)
 // ============================================================
 
 // ===== 1. AUDIO SYNTH MODULE (lines 25-75) =====
@@ -96,19 +96,19 @@ const EXO_MAX_ALIVE = 30;
 
 // Sandbox spawn (shell phase — replaces round-driven spawn)
 const SANDBOX_SPAWN_INTERVAL = 1.5;
-const SANDBOX_MAX_ALIVE = 22;
+const SANDBOX_MAX_ALIVE = 40;
 const SANDBOX_SPAWN_POOL = ['basic', 'runner'];
 const SANDBOX_ENEMY_BASE_SPEED = EXO_SPEED_BASE;
 // Sandbox respawn points — edit this list to add/move/remove spawn locations.
 // On respawn, the point with the greatest min-distance to any alive enemy is chosen,
 // so the player always lands at whichever defined point is currently safest.
-// Coords are in world tiles (0..WORLD_TILES on each axis). WORLD_TILES is 60.
+// Coords are in world tiles (0..WORLD_TILES on each axis). WORLD_TILES is 120.
 const SANDBOX_RESPAWN_POINTS = [
-  { wx: 30, wy: 30 },  // center
-  { wx: 15, wy: 15 },  // NW quadrant
-  { wx: 45, wy: 15 },  // NE quadrant
-  { wx: 15, wy: 45 },  // SW quadrant
-  { wx: 45, wy: 45 },  // SE quadrant
+  { wx: 60, wy: 60 },  // center
+  { wx: 30, wy: 30 },  // NW quadrant
+  { wx: 90, wy: 30 },  // NE quadrant
+  { wx: 30, wy: 90 },  // SW quadrant
+  { wx: 90, wy: 90 },  // SE quadrant
 ];
 
 const ENEMY_TYPES = {
@@ -288,7 +288,7 @@ function formatLeaderboard(board, highlightEntry) {
   return lines.join('\n');
 }
 
-// ===== 6. MOVEMENT / VISUAL / UI CONSTANTS (lines 291-335) =====
+// ===== 6. MOVEMENT / VISUAL / UI CONSTANTS (lines 291-341) =====
 const DASH_DISTANCE = 2.0;
 const DASH_DURATION = 0.18;
 
@@ -333,7 +333,13 @@ const AMMO_PICKUP_W = 10;
 const AMMO_PICKUP_H = 10;
 const AMMO_PICKUP_COLOR = 0xffe066;
 
-// ===== 7. SCENE: init + create() setup (lines 336-721) =====
+// Camera zoom — mouse wheel adjusts within these bounds (multiplicative step).
+const CAM_ZOOM_DEFAULT = 0.75;
+const CAM_ZOOM_MIN = 0.4;
+const CAM_ZOOM_MAX = 1.5;
+const CAM_ZOOM_STEP = 1.1;
+
+// ===== 7. SCENE: init + preload + create() (lines 342-768) =====
 class GameScene extends Phaser.Scene {
   constructor() {
     super({ key: 'GameScene' });
@@ -343,16 +349,28 @@ class GameScene extends Phaser.Scene {
     this.skipTitle = !!(data && data.skipTitle);
   }
 
+  preload() {
+    this.load.image('ammo-pistol',     'assets/ammo-pistol.png');
+    this.load.image('ammo-rifle',      'assets/ammo-rifle.png');
+    this.load.image('ammo-shotgun',    'assets/ammo-shotgun.png');
+    this.load.image('ammo-pistol-ap',  'assets/ammo-pistol-ap.png');
+    this.load.image('ammo-rifle-ap',   'assets/ammo-rifle-ap.png');
+    this.load.image('ammo-shotgun-ap', 'assets/ammo-shotgun-ap.png');
+    this.load.image('health-red',      'assets/health-red.png');
+    this.load.image('health-green',    'assets/health-green.png');
+    this.load.image('armor',           'assets/armor.png');
+  }
+
   create() {
     const cam = this.cameras.main;
-    cam.setZoom(0.75);
+    cam.setZoom(CAM_ZOOM_DEFAULT);
+    cam.setRoundPixels(true);
     cam.centerOn(0, (WORLD_TILES * TILE_H) / 2);
 
     const c0 = worldToScreen(0, 0);
     const c1 = worldToScreen(WORLD_TILES, 0);
     const c2 = worldToScreen(WORLD_TILES, WORLD_TILES);
     const c3 = worldToScreen(0, WORLD_TILES);
-
     const ground = this.add.graphics();
     ground.fillStyle(0x2b2b2b, 1);
     ground.beginPath();
@@ -374,6 +392,12 @@ class GameScene extends Phaser.Scene {
     this.player.x = initS.x;
     this.player.y = initS.y;
     cam.startFollow(this.player, true, 0.12, 0.12);
+
+    this.input.on('wheel', (_p, _o, _dx, deltaY) => {
+      const c = this.cameras.main;
+      const factor = deltaY > 0 ? 1 / CAM_ZOOM_STEP : CAM_ZOOM_STEP;
+      c.setZoom(Phaser.Math.Clamp(c.zoom * factor, CAM_ZOOM_MIN, CAM_ZOOM_MAX));
+    });
 
     this.barrel = this.add.rectangle(0, 0, BARREL_LENGTH, BARREL_THICKNESS, BARREL_COLOR);
     this.barrel.setOrigin(0, 0.5);
@@ -405,7 +429,11 @@ class GameScene extends Phaser.Scene {
 
     this.aimLine = this.add.graphics();
     this.aimLine.setDepth(-500);
-    this.events.on(Phaser.Scenes.Events.PRE_RENDER, this.drawAimLine, this);
+    // Hook on the main camera's PRE_RENDER, NOT the scene event. Scene
+    // PRE_RENDER fires before Camera.preRender(), so cam.getWorldPoint
+    // would use the previous frame's scroll — visible as the aim line
+    // swinging during zoom while the camera lerps to its new scroll.
+    cam.on(Phaser.Cameras.Scene2D.Events.PRE_RENDER, this.drawAimLine, this);
 
     this.bullets = [];
 
@@ -453,6 +481,7 @@ class GameScene extends Phaser.Scene {
 
     const uiCam = this.cameras.add(0, 0, this.scale.width, this.scale.height);
     uiCam.setName('ui');
+    uiCam.setRoundPixels(true);
     this.uiCam = uiCam;
     this.worldObjects = [ground, this.player, this.barrel, this.shadow, this.aimLine];
 
@@ -508,6 +537,24 @@ class GameScene extends Phaser.Scene {
     this.ammoText.setOrigin(1, 0);
     this.ammoText.setScrollFactor(0);
     this.ammoText.setDepth(10000);
+
+    this.fpsText = this.add.text(this.scale.width - 12, 58, '', {
+      fontFamily: 'monospace',
+      fontSize: '14px',
+      color: '#aaaaaa',
+    });
+    this.fpsText.setOrigin(1, 0);
+    this.fpsText.setScrollFactor(0);
+    this.fpsText.setDepth(10000);
+
+    this.game.canvas.style.cursor = 'none';
+    this.crosshair = this.add.graphics();
+    this.crosshair.lineStyle(1, 0xffffff, 0.85);
+    this.crosshair.lineBetween(-6, 0, -2, 0);
+    this.crosshair.lineBetween(2, 0, 6, 0);
+    this.crosshair.lineBetween(0, -6, 0, -2);
+    this.crosshair.lineBetween(0, 2, 0, 6);
+    this.crosshair.setDepth(10500);
 
     this.intermissionText = this.add.text(this.scale.width / 2, this.scale.height / 2 - 80, '', {
       fontFamily: 'monospace',
@@ -644,7 +691,7 @@ class GameScene extends Phaser.Scene {
     this.pauseText.setDepth(20001);
     this.pauseText.setVisible(false);
 
-    cam.ignore([this.hpText, this.staminaLabel, this.staminaBarBg, this.staminaBarFill, this.roundText, this.killsText, this.ammoText, this.intermissionText, this.gameOverText, this.bossBarBg, this.bossBarFill, this.bossLabel, this.titleBg, this.titleText, this.titleSubText, this.titleControls, this.titleLeaderboard, this.titlePrompt, this.pauseBg, this.pauseText]);
+    cam.ignore([this.hpText, this.staminaLabel, this.staminaBarBg, this.staminaBarFill, this.roundText, this.killsText, this.ammoText, this.fpsText, this.crosshair, this.intermissionText, this.gameOverText, this.bossBarBg, this.bossBarFill, this.bossLabel, this.titleBg, this.titleText, this.titleSubText, this.titleControls, this.titleLeaderboard, this.titlePrompt, this.pauseBg, this.pauseText]);
     uiCam.ignore(this.worldObjects);
 
     this.updateHPText();
@@ -719,7 +766,7 @@ class GameScene extends Phaser.Scene {
     });
   }
 
-  // ===== 8. UI/HUD UPDATERS + RELOAD (lines 722-765) =====
+  // ===== 8. UI/HUD UPDATERS + RELOAD (lines 769-812) =====
   updateHPText() {
     this.hpText.setText('HP: ' + this.playerHP + ' / ' + PLAYER_MAX_HP);
   }
@@ -763,9 +810,10 @@ class GameScene extends Phaser.Scene {
     this.updateAmmoText();
   }
 
-  // ===== 9. PICKUP & BURST SPAWNERS (lines 766-780) =====
+  // ===== 9. PICKUP & BURST SPAWNERS (lines 813-828) =====
   spawnAmmoPickup(worldX, worldY) {
-    const gfx = this.add.rectangle(0, 0, AMMO_PICKUP_W, AMMO_PICKUP_H, AMMO_PICKUP_COLOR);
+    const gfx = this.add.image(0, 0, 'ammo-pistol');
+    gfx.setDisplaySize(AMMO_PICKUP_W, AMMO_PICKUP_H);
     this.uiCam.ignore(gfx);
     this.pickups.push({ gfx, worldX, worldY, amount: AMMO_DROP_AMOUNT });
   }
@@ -778,7 +826,7 @@ class GameScene extends Phaser.Scene {
     this.bursts.push({ gfx, life: HIT_BURST_LIFE, total: HIT_BURST_LIFE });
   }
 
-  // ===== 10. ROUND FLOW + SANDBOX SPAWN/RESPAWN (lines 781-843) =====
+  // ===== 10. ROUND FLOW + SANDBOX SPAWN/RESPAWN (lines 829-903) =====
   startIntermission() {
     this.betweenRounds = true;
     this.intermissionTimer = ROUND_INTERMISSION;
@@ -827,6 +875,8 @@ class GameScene extends Phaser.Scene {
   }
 
   respawnPlayer() {
+    const oldWX = this.player.worldX;
+    const oldWY = this.player.worldY;
     const pt = this.pickSafestRespawnPoint();
     this.playerHP = PLAYER_MAX_HP;
     this.player.worldX = pt.wx;
@@ -837,11 +887,21 @@ class GameScene extends Phaser.Scene {
     this.stamina = STAMINA_MAX;
     this.jumpTime = 0;
     this.dashTime = 0;
+    // Sub-step 6: chasing exos break to SEARCH at the death point so
+    // they investigate the corpse instead of relocking on the new spawn.
+    for (const e of this.exos) {
+      if (e.aiState !== AI_STATE_CHASE) continue;
+      e.aiState = AI_STATE_SEARCH;
+      e.aiTargetWX = oldWX;
+      e.aiTargetWY = oldWY;
+      e.aiStateTimer = AI_SEARCH_DURATION;
+      e.aiSoundPriority = 0;
+    }
     this.updateHPText();
     this.updateStaminaBar();
   }
 
-  // ===== 11. TITLE & RUN RECORDING (lines 844-900) =====
+  // ===== 11. TITLE & RUN RECORDING (lines 904-960) =====
   refreshTitleText() {
     if (this.sandboxMode) {
       this.titleLeaderboard.setText('');
@@ -898,7 +958,7 @@ class GameScene extends Phaser.Scene {
     this.recordRunAndFormat('GAME OVER', '#ff5555');
   }
 
-  // ===== 12. BOSS BAR HELPERS (lines 901-913) =====
+  // ===== 12. BOSS BAR HELPERS (lines 961-973) =====
   updateBossBar() {
     if (!this.boss) return;
     const frac = Math.max(0, this.boss.hp / this.boss.maxHp);
@@ -911,7 +971,7 @@ class GameScene extends Phaser.Scene {
     this.bossLabel.setVisible(false);
   }
 
-  // ===== 13. HIT RESOLVER + BODY-PART HELPERS (lines 914-981) =====
+  // ===== 13. HIT RESOLVER + BODY-PART HELPERS (lines 974-1041) =====
   resolveHit(target, hitWX, hitWY, baseDamage, zoneOverride) {
     let zone = zoneOverride || null;
     if (!zone) {
@@ -979,7 +1039,7 @@ class GameScene extends Phaser.Scene {
     if (parts.neck) parts.neck.destroy();
   }
 
-  // ===== 14. ENEMY / BOSS / SLIME SPAWN (lines 982-1097) =====
+  // ===== 14. ENEMY / BOSS / SLIME SPAWN (lines 1042-1159) =====
   spawnBoss() {
     const edge = Math.floor(Math.random() * 4);
     let wx, wy;
@@ -1023,6 +1083,7 @@ class GameScene extends Phaser.Scene {
       aiTargetWX: null,
       aiTargetWY: null,
       aiStateTimer: 0,
+      aiChaseMemoryTimer: 0,
       aiFacing: Math.atan2(WORLD_TILES / 2 - wy, WORLD_TILES / 2 - wx),
       aiSoundPriority: 0,
     };
@@ -1090,13 +1151,17 @@ class GameScene extends Phaser.Scene {
       aiTargetWX: null,
       aiTargetWY: null,
       aiStateTimer: 0,
+      aiChaseMemoryTimer: 0,
       aiFacing: Math.atan2(WORLD_TILES / 2 - wy, WORLD_TILES / 2 - wx),
       aiSoundPriority: 0,
     });
   }
 
-  // ===== 15. update() main loop (lines 1098-1542) =====
+  // ===== 15. update() main loop (lines 1160-1600) =====
   update(time, delta) {
+    this.fpsText.setText('FPS ' + Math.round(this.game.loop.actualFps));
+    this.crosshair.x = this.input.activePointer.x;
+    this.crosshair.y = this.input.activePointer.y;
     const k = this.keys;
     const dtPre = delta / 1000;
 
@@ -1313,15 +1378,8 @@ class GameScene extends Phaser.Scene {
 
     for (let i = this.exos.length - 1; i >= 0; i--) {
       const e = this.exos[i];
-      let edx = this.player.worldX - e.worldX;
-      let edy = this.player.worldY - e.worldY;
-      const elen = Math.hypot(edx, edy);
-      if (elen > 0) {
-        edx /= elen;
-        edy /= elen;
-        e.worldX += edx * e.speed * dt;
-        e.worldY += edy * e.speed * dt;
-      }
+      updateExoAI(this, e, dt);
+      const elen = Math.hypot(this.player.worldX - e.worldX, this.player.worldY - e.worldY);
       if (e.touchTimer > 0) e.touchTimer -= dt;
       if (elen <= e.touchRadius && e.touchTimer <= 0 && this.jumpTime <= 0) {
         const touchResult = this.resolveHit(this.player, e.worldX, e.worldY, e.damage, 'body');
@@ -1540,7 +1598,7 @@ class GameScene extends Phaser.Scene {
     this.aiSoundEvents.length = 0;
   }
 
-  // ===== 16. drawAimLine() PRE_RENDER (lines 1543-1559) =====
+  // ===== 16. drawAimLine() PRE_RENDER (lines 1601-1618) =====
   drawAimLine() {
     if (!this.aimLine || !this.player) return;
     this.aimLine.clear();
